@@ -31,27 +31,33 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Package plasmoid
-        run: |
-          cd build/pkg
-          tar czf whatcable-linux-plasmoid-${GITHUB_REF_NAME}.tar.gz org.kde.whatcable/
-
-      - name: Package CLI
+      - name: Package CLI binary
         run: |
           mkdir -p build/dist
           cp build/src/cli/whatcable-linux build/dist/
-          cp build/src/plasmoid/libwhatcable-plasmoid-plugin.so build/dist/
-          cp -r build/qml build/dist/
           cd build/dist
-          tar czf ../whatcable-linux-${GITHUB_REF_NAME}-x86_64.tar.gz .
+          tar czf ../whatcable-linux-cli-${GITHUB_REF_NAME}-x86_64.tar.gz whatcable-linux
+
+      - name: Package Plasmoid (KPackage for kpackagetool6)
+        run: |
+          cd build/pkg
+          tar czf ../whatcable-linux-plasmoid-${GITHUB_REF_NAME}.tar.gz org.kde.whatcable/
+
+      - name: Package QML plugin (required for Plasmoid runtime)
+        run: |
+          cd build
+          tar czf whatcable-linux-qml-plugin-${GITHUB_REF_NAME}-x86_64.tar.gz \
+            qml/org/kde/whatcable/libwhatcable-plasmoid-plugin.so \
+            qml/org/kde/whatcable/qmldir
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-assets
           path: |
-            build/pkg/whatcable-linux-plasmoid-*.tar.gz
-            build/whatcable-linux-*-x86_64.tar.gz
+            build/whatcable-linux-cli-*.tar.gz
+            build/whatcable-linux-plasmoid-*.tar.gz
+            build/whatcable-linux-qml-plugin-*.tar.gz
 
   release:
     needs: build
@@ -69,6 +75,31 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body: |
+            ## Release Assets
+
+            | File | Description |
+            |------|-------------|
+            | `whatcable-linux-cli-${{ github.ref_name }}-x86_64.tar.gz` | Standalone CLI binary. Extract and run `./whatcable-linux`. |
+            | `whatcable-linux-plasmoid-${{ github.ref_name }}.tar.gz` | KDE Plasma 6 widget package. Install with `kpackagetool6 -t Plasma/Applet -i org.kde.whatcable`. |
+            | `whatcable-linux-qml-plugin-${{ github.ref_name }}-x86_64.tar.gz` | QML plugin required by the Plasmoid. Extract to `/usr/lib64/qt6/qml/` (or your distro's Qt QML path). |
+
+            ### Quick install (Plasmoid)
+
+            ```bash
+            # Install the QML plugin (required once)
+            sudo tar xzf whatcable-linux-qml-plugin-${{ github.ref_name }}-x86_64.tar.gz -C /usr/lib64/qt6/qml/
+
+            # Install the Plasmoid
+            tar xzf whatcable-linux-plasmoid-${{ github.ref_name }}.tar.gz
+            kpackagetool6 -t Plasma/Applet -i org.kde.whatcable
+            ```
+
+            ### Quick install (CLI only)
+
+            ```bash
+            tar xzf whatcable-linux-cli-${{ github.ref_name }}-x86_64.tar.gz
+            sudo mv whatcable-linux /usr/local/bin/
+            ```
           files: |
             assets/**/*.tar.gz

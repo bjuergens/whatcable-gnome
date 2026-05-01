@@ -6,6 +6,8 @@ A KDE Plasma 6 system tray widget and CLI tool that tells you, in plain English,
 
 **WhatCable-Linux is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable), a macOS menu bar app by [Darryl Morley](https://github.com/darrylmorley).** This port expands the original USB-C focus to cover all USB devices, while preserving the rich USB-C Power Delivery diagnostics from the original.
 
+![WhatCable-Linux Plasmoid](screenshot.png)
+
 ## What it shows
 
 ### All USB devices
