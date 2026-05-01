@@ -9,7 +9,10 @@ target_link_libraries(whatcable-plasmoid-plugin PRIVATE
     Qt6::Quick
 )
 
-install(TARGETS whatcable-plasmoid-plugin DESTINATION ${KDE_INSTALL_PLUGINDIR}/plasma/applets)
+# Install the QML plugin to the Qt QML import path so "import org.kde.whatcable" works
+set(QML_INSTALL_DIR "${KDE_INSTALL_QMLDIR}/org/kde/whatcable")
+install(TARGETS whatcable-plasmoid-plugin DESTINATION ${QML_INSTALL_DIR})
+install(FILES plugin/qmldir DESTINATION ${QML_INSTALL_DIR})
 
 plasma_install_package(. org.kde.whatcable)
 
@@ -25,5 +28,13 @@ add_custom_command(TARGET whatcable-plasmoid-plugin POST_BUILD
         "${CMAKE_CURRENT_SOURCE_DIR}/contents/ui/DeviceCard.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/contents/ui/PowerSourceList.qml"
         "${PKG_DIR}/contents/ui/"
-    COMMENT "Assembling plasmoid package in build/pkg/org.kde.whatcable"
+    # Also stage the QML plugin for local development
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/qml/org/kde/whatcable"
+    COMMAND ${CMAKE_COMMAND} -E copy
+        "$<TARGET_FILE:whatcable-plasmoid-plugin>"
+        "${CMAKE_BINARY_DIR}/qml/org/kde/whatcable/"
+    COMMAND ${CMAKE_COMMAND} -E copy
+        "${CMAKE_CURRENT_SOURCE_DIR}/plugin/qmldir"
+        "${CMAKE_BINARY_DIR}/qml/org/kde/whatcable/"
+    COMMENT "Assembling plasmoid package and QML plugin"
 )

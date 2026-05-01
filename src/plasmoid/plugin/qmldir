@@ -1,0 +1,2 @@
+module org.kde.whatcable
+plugin whatcable-plasmoid-plugin
