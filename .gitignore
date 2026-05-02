@@ -3,6 +3,7 @@ CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 Makefile
+!gnome-extension/Makefile
 *.o
 *.a
 *.so

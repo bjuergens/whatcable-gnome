@@ -19,11 +19,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          dnf install -y gcc-c++ cmake extra-cmake-modules \
-            qt6-qtbase-devel qt6-qtdeclarative-devel \
-            kf6-kirigami-devel kf6-ki18n-devel kf6-kcoreaddons-devel \
-            kf6-kpackage-devel libplasma-devel plasma-workspace-devel \
-            systemd-devel tar gzip
+          dnf install -y gcc-c++ cmake \
+            qt6-qtbase-devel \
+            systemd-devel tar gzip zip
 
       - name: Configure
         run: cmake -B build -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release
@@ -38,17 +36,11 @@ jobs:
           cd build/dist
           tar czf ../whatcable-linux-cli-${GITHUB_REF_NAME}-x86_64.tar.gz whatcable-linux
 
-      - name: Package Plasmoid (KPackage for kpackagetool6)
+      - name: Package GNOME Shell extension
         run: |
-          cd build/pkg
-          tar czf ../whatcable-linux-plasmoid-${GITHUB_REF_NAME}.tar.gz org.kde.whatcable/
-
-      - name: Package QML plugin (required for Plasmoid runtime)
-        run: |
-          cd build
-          tar czf whatcable-linux-qml-plugin-${GITHUB_REF_NAME}-x86_64.tar.gz \
-            qml/org/kde/whatcable/libwhatcable-plasmoid-plugin.so \
-            qml/org/kde/whatcable/qmldir
+          cd gnome-extension
+          zip -j ../build/whatcable-gnome-extension-${GITHUB_REF_NAME}.zip \
+            metadata.json extension.js stylesheet.css
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -56,8 +48,7 @@ jobs:
           name: release-assets
           path: |
             build/whatcable-linux-cli-*.tar.gz
-            build/whatcable-linux-plasmoid-*.tar.gz
-            build/whatcable-linux-qml-plugin-*.tar.gz
+            build/whatcable-gnome-extension-*.zip
 
   release:
     needs: build
@@ -81,25 +72,22 @@ jobs:
             | File | Description |
             |------|-------------|
             | `whatcable-linux-cli-${{ github.ref_name }}-x86_64.tar.gz` | Standalone CLI binary. Extract and run `./whatcable-linux`. |
-            | `whatcable-linux-plasmoid-${{ github.ref_name }}.tar.gz` | KDE Plasma 6 widget package. Install with `kpackagetool6 -t Plasma/Applet -i org.kde.whatcable`. |
-            | `whatcable-linux-qml-plugin-${{ github.ref_name }}-x86_64.tar.gz` | QML plugin required by the Plasmoid. Extract to `/usr/lib64/qt6/qml/` (or your distro's Qt QML path). |
+            | `whatcable-gnome-extension-${{ github.ref_name }}.zip` | GNOME Shell extension. Install with `gnome-extensions install --force <file>`. Requires the CLI on `$PATH`. |
 
-            ### Quick install (Plasmoid)
-
-            ```bash
-            # Install the QML plugin (required once)
-            sudo tar xzf whatcable-linux-qml-plugin-${{ github.ref_name }}-x86_64.tar.gz -C /usr/lib64/qt6/qml/
-
-            # Install the Plasmoid
-            tar xzf whatcable-linux-plasmoid-${{ github.ref_name }}.tar.gz
-            kpackagetool6 -t Plasma/Applet -i org.kde.whatcable
-            ```
-
-            ### Quick install (CLI only)
+            ### Quick install (CLI)
 
             ```bash
             tar xzf whatcable-linux-cli-${{ github.ref_name }}-x86_64.tar.gz
             sudo mv whatcable-linux /usr/local/bin/
             ```
+
+            ### Quick install (GNOME extension)
+
+            ```bash
+            gnome-extensions install --force whatcable-gnome-extension-${{ github.ref_name }}.zip
+            # Restart GNOME Shell (log out / back in on Wayland)
+            gnome-extensions enable whatcable@whatcable.local
+            ```
           files: |
             assets/**/*.tar.gz
+            assets/**/*.zip

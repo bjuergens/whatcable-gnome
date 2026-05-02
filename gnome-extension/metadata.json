@@ -1,0 +1,8 @@
+{
+    "uuid": "whatcable@whatcable.local",
+    "name": "WhatCable",
+    "description": "Shows what each USB cable and device can do. Lists every USB device with speed, power, and USB-C cable / Power Delivery details. Port of WhatCable (macOS) by Darryl Morley.",
+    "shell-version": ["45", "46", "47", "48"],
+    "url": "https://github.com/bjuergens/whatcable-gnome",
+    "version": 1
+}
