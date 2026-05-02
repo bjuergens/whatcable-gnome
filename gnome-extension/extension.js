@@ -13,7 +13,6 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
-const REFRESH_INTERVAL_SECONDS = 5;
 const CLI_CANDIDATES = [
     'whatcable-linux',
     '/usr/local/bin/whatcable-linux',
@@ -34,11 +33,11 @@ function findCliPath() {
     return null;
 }
 
-function runCliAsync(cliPath, cancellable, callback) {
+function runCliAsync(cliPath, args, cancellable, callback) {
     let proc;
     try {
         proc = new Gio.Subprocess({
-            argv: [cliPath, '--json'],
+            argv: [cliPath, ...args],
             flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
         });
         proc.init(cancellable);
@@ -54,8 +53,7 @@ function runCliAsync(cliPath, cancellable, callback) {
                 callback(null, stderr?.trim() || 'CLI exited with non-zero status');
                 return;
             }
-            const parsed = JSON.parse(stdout);
-            callback(parsed, null);
+            callback(stdout, null);
         } catch (e) {
             if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
                 return;
@@ -65,15 +63,31 @@ function runCliAsync(cliPath, cancellable, callback) {
     return proc;
 }
 
+function readBuildTime(extensionPath) {
+    try {
+        const file = Gio.File.new_for_path(`${extensionPath}/buildinfo.json`);
+        const [ok, contents] = file.load_contents(null);
+        if (!ok)
+            return null;
+        const decoder = new TextDecoder();
+        const parsed = JSON.parse(decoder.decode(contents));
+        return parsed.buildTime ?? null;
+    } catch (_e) {
+        return null;
+    }
+}
+
 const WhatCableIndicator = GObject.registerClass(
 class WhatCableIndicator extends PanelMenu.Button {
-    _init() {
+    _init(extensionPath) {
         super._init(0.0, 'WhatCable');
-        this._refreshTimerId = 0;
         this._disposed = false;
         this._inFlight = false;
         this._cancellable = new Gio.Cancellable();
         this._cliPath = findCliPath();
+        this._buildTime = readBuildTime(extensionPath);
+        this._cliVersion = null;
+        this._lastRefreshTime = null;
 
         const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
         this._icon = new St.Icon({
@@ -90,8 +104,8 @@ class WhatCableIndicator extends PanelMenu.Button {
         this.add_child(box);
 
         this._buildMenu();
+        this._fetchCliVersion();
         this._refresh();
-        this._scheduleRefresh();
 
         this.menu.connect('open-state-changed', (_menu, open) => {
             if (open)
@@ -118,19 +132,39 @@ class WhatCableIndicator extends PanelMenu.Button {
         const refreshItem = new PopupMenu.PopupMenuItem('Refresh');
         refreshItem.connect('activate', () => this._refresh());
         this.menu.addMenuItem(refreshItem);
+
+        this._debugMenu = new PopupMenu.PopupSubMenuMenuItem('Debug info');
+        this._buildTimeItem = new PopupMenu.PopupMenuItem('', {reactive: false});
+        this._cliVersionItem = new PopupMenu.PopupMenuItem('', {reactive: false});
+        this._lastRefreshItem = new PopupMenu.PopupMenuItem('', {reactive: false});
+        this._debugMenu.menu.addMenuItem(this._buildTimeItem);
+        this._debugMenu.menu.addMenuItem(this._cliVersionItem);
+        this._debugMenu.menu.addMenuItem(this._lastRefreshItem);
+        this.menu.addMenuItem(this._debugMenu);
+        this._updateDebugItems();
     }
 
-    _scheduleRefresh() {
-        this._refreshTimerId = GLib.timeout_add_seconds(
-            GLib.PRIORITY_DEFAULT,
-            REFRESH_INTERVAL_SECONDS,
-            () => {
-                if (this._disposed)
-                    return GLib.SOURCE_REMOVE;
-                this._refresh();
-                return GLib.SOURCE_CONTINUE;
-            },
-        );
+    _updateDebugItems() {
+        this._buildTimeItem.label.text =
+            `Extension build: ${this._buildTime ?? 'unknown'}`;
+        this._cliVersionItem.label.text =
+            `whatcable-linux: ${this._cliVersion ?? 'unknown'}`;
+        this._lastRefreshItem.label.text =
+            `Last refresh: ${this._lastRefreshTime ?? 'never'}`;
+    }
+
+    _fetchCliVersion() {
+        if (!this._cliPath) {
+            this._cliVersion = 'CLI not found';
+            this._updateDebugItems();
+            return;
+        }
+        runCliAsync(this._cliPath, ['--version'], this._cancellable, (stdout, error) => {
+            if (this._disposed)
+                return;
+            this._cliVersion = error ? `error: ${error}` : (stdout?.trim() || 'unknown');
+            this._updateDebugItems();
+        });
     }
 
     _refresh() {
@@ -144,7 +178,7 @@ class WhatCableIndicator extends PanelMenu.Button {
             return;
         }
         this._inFlight = true;
-        runCliAsync(this._cliPath, this._cancellable, (devices, error) => {
+        runCliAsync(this._cliPath, ['--json'], this._cancellable, (stdout, error) => {
             this._inFlight = false;
             if (this._disposed)
                 return;
@@ -152,6 +186,15 @@ class WhatCableIndicator extends PanelMenu.Button {
                 this._showError(error);
                 return;
             }
+            let devices;
+            try {
+                devices = JSON.parse(stdout);
+            } catch (e) {
+                this._showError(`Failed to parse CLI output: ${e.message}`);
+                return;
+            }
+            this._lastRefreshTime = new Date().toLocaleTimeString();
+            this._updateDebugItems();
             this._showDevices(devices ?? []);
         });
     }
@@ -229,10 +272,6 @@ class WhatCableIndicator extends PanelMenu.Button {
 
     destroy() {
         this._disposed = true;
-        if (this._refreshTimerId) {
-            GLib.source_remove(this._refreshTimerId);
-            this._refreshTimerId = 0;
-        }
         this._cancellable?.cancel();
         this._cancellable = null;
         super.destroy();
@@ -241,7 +280,7 @@ class WhatCableIndicator extends PanelMenu.Button {
 
 export default class WhatCableExtension extends Extension {
     enable() {
-        this._indicator = new WhatCableIndicator();
+        this._indicator = new WhatCableIndicator(this.path);
         Main.panel.addToStatusArea(this.uuid, this._indicator);
     }
 
