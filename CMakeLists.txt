@@ -15,8 +15,8 @@ add_subdirectory(src/core)
 add_subdirectory(src/cli)
 
 # Optional: install the GNOME Shell extension into the system extensions dir.
-# Most users install via `make install-extension` (see gnome-extension/Makefile)
-# or by copying to ~/.local/share/gnome-shell/extensions/ directly.
+# Most users install via `cd gnome-extension && make install` (per-user)
+# or copy the files to ~/.local/share/gnome-shell/extensions/ directly.
 option(INSTALL_GNOME_EXTENSION "Install GNOME Shell extension files system-wide" OFF)
 if(INSTALL_GNOME_EXTENSION)
     install(DIRECTORY gnome-extension/

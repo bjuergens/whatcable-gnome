@@ -8,24 +8,25 @@
 }
 
 .whatcable-subtitle {
-    color: rgba(255, 255, 255, 0.75);
+    opacity: 0.75;
     font-size: 0.95em;
 }
 
 .whatcable-bullet {
-    color: rgba(255, 255, 255, 0.85);
+    opacity: 0.85;
     font-size: 0.95em;
 }
 
 .whatcable-detail {
-    color: rgba(255, 255, 255, 0.6);
+    opacity: 0.6;
     font-size: 0.9em;
+    padding-left: 1.2em;
 }
 
 .whatcable-ok {
-    color: #8ae234;
+    color: #26a269;
 }
 
 .whatcable-warning {
-    color: #fcaf3e;
+    color: #e5a50a;
 }

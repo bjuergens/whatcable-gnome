@@ -34,20 +34,20 @@ function findCliPath() {
     return null;
 }
 
-function runCliAsync(cliPath, callback) {
+function runCliAsync(cliPath, cancellable, callback) {
     let proc;
     try {
         proc = new Gio.Subprocess({
             argv: [cliPath, '--json'],
             flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
         });
-        proc.init(null);
+        proc.init(cancellable);
     } catch (e) {
         callback(null, `Failed to launch ${cliPath}: ${e.message}`);
-        return;
+        return null;
     }
 
-    proc.communicate_utf8_async(null, null, (p, res) => {
+    proc.communicate_utf8_async(null, cancellable, (p, res) => {
         try {
             const [, stdout, stderr] = p.communicate_utf8_finish(res);
             if (!p.get_successful()) {
@@ -57,17 +57,22 @@ function runCliAsync(cliPath, callback) {
             const parsed = JSON.parse(stdout);
             callback(parsed, null);
         } catch (e) {
+            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                return;
             callback(null, e.message);
         }
     });
+    return proc;
 }
 
 const WhatCableIndicator = GObject.registerClass(
 class WhatCableIndicator extends PanelMenu.Button {
-    _init(extension) {
+    _init() {
         super._init(0.0, 'WhatCable');
-        this._extension = extension;
         this._refreshTimerId = 0;
+        this._disposed = false;
+        this._inFlight = false;
+        this._cancellable = new Gio.Cancellable();
         this._cliPath = findCliPath();
 
         const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
@@ -102,8 +107,7 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._statusItem = new PopupMenu.PopupMenuItem('Loading…', {reactive: false});
         this.menu.addMenuItem(this._statusItem);
 
-        this._separator = new PopupMenu.PopupSeparatorMenuItem();
-        this.menu.addMenuItem(this._separator);
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         this._devicesSection = new PopupMenu.PopupMenuSection();
         this.menu.addMenuItem(this._devicesSection);
@@ -120,6 +124,8 @@ class WhatCableIndicator extends PanelMenu.Button {
             GLib.PRIORITY_DEFAULT,
             REFRESH_INTERVAL_SECONDS,
             () => {
+                if (this._disposed)
+                    return GLib.SOURCE_REMOVE;
                 this._refresh();
                 return GLib.SOURCE_CONTINUE;
             },
@@ -127,6 +133,8 @@ class WhatCableIndicator extends PanelMenu.Button {
     }
 
     _refresh() {
+        if (this._disposed || this._inFlight)
+            return;
         if (!this._cliPath) {
             this._showError(
                 'whatcable-linux CLI not found.\n' +
@@ -134,7 +142,11 @@ class WhatCableIndicator extends PanelMenu.Button {
             );
             return;
         }
-        runCliAsync(this._cliPath, (devices, error) => {
+        this._inFlight = true;
+        runCliAsync(this._cliPath, this._cancellable, (devices, error) => {
+            this._inFlight = false;
+            if (this._disposed)
+                return;
             if (error) {
                 this._showError(error);
                 return;
@@ -184,7 +196,7 @@ class WhatCableIndicator extends PanelMenu.Button {
                 : 'whatcable-ok';
             item.menu.addMenuItem(c);
             if (dev.charging.detail) {
-                const d = new PopupMenu.PopupMenuItem(`  ${dev.charging.detail}`, {reactive: false});
+                const d = new PopupMenu.PopupMenuItem(dev.charging.detail, {reactive: false});
                 d.label.style_class = 'whatcable-detail';
                 item.menu.addMenuItem(d);
             }
@@ -209,17 +221,20 @@ class WhatCableIndicator extends PanelMenu.Button {
     }
 
     destroy() {
+        this._disposed = true;
         if (this._refreshTimerId) {
             GLib.source_remove(this._refreshTimerId);
             this._refreshTimerId = 0;
         }
+        this._cancellable?.cancel();
+        this._cancellable = null;
         super.destroy();
     }
 });
 
 export default class WhatCableExtension extends Extension {
     enable() {
-        this._indicator = new WhatCableIndicator(this);
+        this._indicator = new WhatCableIndicator();
         Main.panel.addToStatusArea(this.uuid, this._indicator);
     }
 
