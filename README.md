@@ -92,7 +92,7 @@ whatcable-linux --help
 
 rebuild, reinstall and start a new gnome shell in a window with the new version
 
-```
+```bash
 cmake -B build -DCMAKE_INSTALL_PREFIX=/usr/local && cmake --build build&&sudo cmake --install build && cd gnome-extension && make install && cd .. && MUTTER_DEBUG_DUMMY_MODE_SPECS=1600x1000 dbus-run-session -- gnome-shell --nested --wayland
 ```
 
