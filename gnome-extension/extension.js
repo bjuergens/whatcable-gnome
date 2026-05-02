@@ -89,6 +89,7 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._cliVersion = null;
         this._lastRefreshTime = null;
         this._showEmptyPorts = false;
+        this._showInternalDevices = false;
         this._lastDevices = null;
 
         const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
@@ -139,18 +140,21 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._buildTimeItem = new PopupMenu.PopupMenuItem('', {reactive: false});
         this._cliVersionItem = new PopupMenu.PopupMenuItem('', {reactive: false});
         this._lastRefreshItem = new PopupMenu.PopupMenuItem('', {reactive: false});
-        this._showEmptyPortsItem = new PopupMenu.PopupSwitchMenuItem(
-            'Show empty ports', this._showEmptyPorts);
-        this._showEmptyPortsItem.connect('toggled', (_item, state) => {
-            this._showEmptyPorts = state;
-            this._lastSignature = null;
-            if (this._lastDevices)
-                this._showDevices(this._lastDevices);
-        });
+        this._showEmptyPortsItem = this._makeStickySwitch(
+            'Show empty ports', this._showEmptyPorts, state => {
+                this._showEmptyPorts = state;
+                this._rerenderDevices();
+            });
+        this._showInternalDevicesItem = this._makeStickySwitch(
+            'Show internal devices', this._showInternalDevices, state => {
+                this._showInternalDevices = state;
+                this._rerenderDevices();
+            });
         this._debugMenu.menu.addMenuItem(this._buildTimeItem);
         this._debugMenu.menu.addMenuItem(this._cliVersionItem);
         this._debugMenu.menu.addMenuItem(this._lastRefreshItem);
         this._debugMenu.menu.addMenuItem(this._showEmptyPortsItem);
+        this._debugMenu.menu.addMenuItem(this._showInternalDevicesItem);
         this.menu.addMenuItem(this._debugMenu);
         this._updateDebugItems();
     }
@@ -217,11 +221,35 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._lastSignature = null;
     }
 
+    _makeStickySwitch(label, initial, onToggled) {
+        const item = new PopupMenu.PopupSwitchMenuItem(label, initial);
+        // Override activate() so clicking the switch toggles state without
+        // bubbling the activate signal up to the parent menu (which would close it).
+        item.activate = function (_event) {
+            if (this._switch.mapped)
+                this.toggle();
+        };
+        item.connect('toggled', (_i, state) => onToggled(state));
+        return item;
+    }
+
+    _rerenderDevices() {
+        this._lastSignature = null;
+        if (this._lastDevices)
+            this._showDevices(this._lastDevices);
+    }
+
     _showDevices(devices) {
         this._lastDevices = devices;
-        const filtered = this._showEmptyPorts
-            ? devices
-            : devices.filter(d => !(d.category === 'typec' && d.typec && !d.typec.connected));
+        const filtered = devices.filter(d => {
+            if (!this._showEmptyPorts &&
+                d.category === 'typec' && d.typec && !d.typec.connected)
+                return false;
+            if (!this._showInternalDevices &&
+                d.category !== 'typec' && d.usb?.removable === 'fixed')
+                return false;
+            return true;
+        });
 
         const signature = JSON.stringify(filtered);
         if (signature === this._lastSignature)
