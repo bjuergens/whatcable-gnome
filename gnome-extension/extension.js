@@ -110,6 +110,8 @@ class WhatCableIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         this._devicesSection = new PopupMenu.PopupMenuSection();
+        this._deviceItems = new Map();
+        this._deviceOrder = [];
         this.menu.addMenuItem(this._devicesSection);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
@@ -158,7 +160,13 @@ class WhatCableIndicator extends PanelMenu.Button {
     _showError(message) {
         this._countLabel.text = '';
         this._statusItem.label.text = message;
+        this._clearDevices();
+    }
+
+    _clearDevices() {
         this._devicesSection.removeAll();
+        this._deviceItems.clear();
+        this._deviceOrder = [];
     }
 
     _showDevices(devices) {
@@ -168,13 +176,53 @@ class WhatCableIndicator extends PanelMenu.Button {
             ? 'No USB devices found'
             : `${count} USB device${count === 1 ? '' : 's'}`;
 
-        this._devicesSection.removeAll();
-        for (const dev of devices)
-            this._devicesSection.addMenuItem(this._buildDeviceItem(dev));
+        const newKeys = devices.map((d, i) => this._deviceKey(d, i));
+        const orderChanged = newKeys.length !== this._deviceOrder.length ||
+            newKeys.some((k, i) => k !== this._deviceOrder[i]);
+
+        if (orderChanged) {
+            this._clearDevices();
+            for (let i = 0; i < devices.length; i++) {
+                const item = this._buildDeviceItem(devices[i]);
+                item._whatcableSig = this._deviceSignature(devices[i]);
+                this._devicesSection.addMenuItem(item);
+                this._deviceItems.set(newKeys[i], item);
+            }
+            this._deviceOrder = newKeys;
+            return;
+        }
+
+        for (let i = 0; i < devices.length; i++) {
+            const item = this._deviceItems.get(newKeys[i]);
+            const sig = this._deviceSignature(devices[i]);
+            if (item._whatcableSig !== sig) {
+                this._populateDeviceItem(item, devices[i]);
+                item._whatcableSig = sig;
+            }
+        }
+    }
+
+    _deviceKey(dev, index) {
+        if (dev.usb && dev.usb.bus != null && dev.usb.device != null)
+            return `usb:${dev.usb.bus}:${dev.usb.device}`;
+        if (dev.typec && dev.typec.port != null)
+            return `typec:${dev.typec.port}`;
+        return `idx:${index}:${dev.headline ?? ''}`;
+    }
+
+    _deviceSignature(dev) {
+        return JSON.stringify(dev);
     }
 
     _buildDeviceItem(dev) {
         const item = new PopupMenu.PopupSubMenuMenuItem(dev.headline ?? 'USB device');
+        this._populateDeviceItem(item, dev);
+        return item;
+    }
+
+    _populateDeviceItem(item, dev) {
+        item.label.text = dev.headline ?? 'USB device';
+        item.menu.removeAll();
 
         if (dev.subtitle) {
             const sub = new PopupMenu.PopupMenuItem(dev.subtitle, {reactive: false});
@@ -216,8 +264,6 @@ class WhatCableIndicator extends PanelMenu.Button {
                 item.menu.addMenuItem(p);
             }
         }
-
-        return item;
     }
 
     destroy() {
