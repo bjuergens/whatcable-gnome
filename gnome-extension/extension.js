@@ -88,6 +88,8 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._buildTime = readBuildTime(extensionPath);
         this._cliVersion = null;
         this._lastRefreshTime = null;
+        this._showEmptyPorts = false;
+        this._lastDevices = null;
 
         const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
         this._icon = new St.Icon({
@@ -137,9 +139,18 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._buildTimeItem = new PopupMenu.PopupMenuItem('', {reactive: false});
         this._cliVersionItem = new PopupMenu.PopupMenuItem('', {reactive: false});
         this._lastRefreshItem = new PopupMenu.PopupMenuItem('', {reactive: false});
+        this._showEmptyPortsItem = new PopupMenu.PopupSwitchMenuItem(
+            'Show empty ports', this._showEmptyPorts);
+        this._showEmptyPortsItem.connect('toggled', (_item, state) => {
+            this._showEmptyPorts = state;
+            this._lastSignature = null;
+            if (this._lastDevices)
+                this._showDevices(this._lastDevices);
+        });
         this._debugMenu.menu.addMenuItem(this._buildTimeItem);
         this._debugMenu.menu.addMenuItem(this._cliVersionItem);
         this._debugMenu.menu.addMenuItem(this._lastRefreshItem);
+        this._debugMenu.menu.addMenuItem(this._showEmptyPortsItem);
         this.menu.addMenuItem(this._debugMenu);
         this._updateDebugItems();
     }
@@ -207,19 +218,24 @@ class WhatCableIndicator extends PanelMenu.Button {
     }
 
     _showDevices(devices) {
-        const signature = JSON.stringify(devices);
+        this._lastDevices = devices;
+        const filtered = this._showEmptyPorts
+            ? devices
+            : devices.filter(d => !(d.category === 'typec' && d.typec && !d.typec.connected));
+
+        const signature = JSON.stringify(filtered);
         if (signature === this._lastSignature)
             return;
         this._lastSignature = signature;
 
-        const count = devices.length;
+        const count = filtered.length;
         this._countLabel.text = count > 0 ? ` ${count}` : '';
         this._statusItem.label.text = count === 0
             ? 'No USB devices found'
             : `${count} USB device${count === 1 ? '' : 's'}`;
 
         this._devicesSection.removeAll();
-        for (const dev of devices)
+        for (const dev of filtered)
             this._devicesSection.addMenuItem(this._buildDeviceItem(dev));
     }
 
