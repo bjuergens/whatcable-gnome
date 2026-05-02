@@ -88,6 +88,14 @@ whatcable-linux --version
 whatcable-linux --help
 ```
 
+### quick local test
+
+rebuild, reinstall and start a new gnome shell in a window with the new version
+
+```
+cmake -B build -DCMAKE_INSTALL_PREFIX=/usr/local && cmake --build build&&sudo cmake --install build && cd gnome-extension && make install && cd .. && MUTTER_DEBUG_DUMMY_MODE_SPECS=1600x1000 dbus-run-session -- gnome-shell --nested --wayland
+```
+
 ## How it works
 
 WhatCable-GNOME reads three areas of the Linux sysfs virtual filesystem. No root access required for basic info:
