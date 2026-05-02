@@ -110,6 +110,7 @@ class WhatCableIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         this._devicesSection = new PopupMenu.PopupMenuSection();
+        this._lastSignature = null;
         this.menu.addMenuItem(this._devicesSection);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
@@ -159,9 +160,15 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._countLabel.text = '';
         this._statusItem.label.text = message;
         this._devicesSection.removeAll();
+        this._lastSignature = null;
     }
 
     _showDevices(devices) {
+        const signature = JSON.stringify(devices);
+        if (signature === this._lastSignature)
+            return;
+        this._lastSignature = signature;
+
         const count = devices.length;
         this._countLabel.text = count > 0 ? ` ${count}` : '';
         this._statusItem.label.text = count === 0
