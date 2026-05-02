@@ -1,12 +1,12 @@
-# WhatCable-Linux
+# WhatCable-GNOME
 
 > **What can this USB cable actually do?**
 
-A KDE Plasma 6 system tray widget and CLI tool that tells you, in plain English, what each USB device plugged into your Linux machine can actually do.
+A GNOME Shell extension and CLI tool that tells you, in plain English, what each USB device plugged into your Linux machine can actually do.
 
-**WhatCable-Linux is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable), a macOS menu bar app by [Darryl Morley](https://github.com/darrylmorley).** This port expands the original USB-C focus to cover all USB devices, while preserving the rich USB-C Power Delivery diagnostics from the original.
+**WhatCable-GNOME is a GNOME port of [WhatCable](https://github.com/darrylmorley/whatcable), a macOS menu bar app by [Darryl Morley](https://github.com/darrylmorley).** It expands the original USB-C focus to cover all USB devices, while preserving the rich USB-C Power Delivery diagnostics from the original.
 
-![WhatCable-Linux Plasmoid](screenshot.png)
+![WhatCable-GNOME](screenshot.png)
 
 ## What it shows
 
@@ -28,25 +28,51 @@ A KDE Plasma 6 system tray widget and CLI tool that tells you, in plain English,
 
 ## Install
 
-### Build from source
+### Build the CLI
+
+The GNOME extension shells out to the `whatcable-linux` CLI, so build and install that first.
 
 ```bash
 # Install dependencies (Fedora)
-sudo dnf install cmake extra-cmake-modules qt6-qtbase-devel qt6-qtdeclarative-devel \
-    kf6-kirigami-devel kf6-ki18n-devel kf6-kcoreaddons-devel kf6-kpackage-devel \
-    libplasma-devel plasma-workspace-devel systemd-devel
+sudo dnf install gcc-c++ cmake qt6-qtbase-devel systemd-devel
 
 # Install dependencies (Arch/Manjaro)
-sudo pacman -S cmake extra-cmake-modules qt6-base qt6-declarative \
-    kirigami ki18n plasma-workspace systemd-libs kpackage
+sudo pacman -S base-devel cmake qt6-base systemd-libs
+
+# Install dependencies (Debian/Ubuntu)
+sudo apt install build-essential cmake qt6-base-dev libudev-dev pkg-config
 
 # Build
-cmake -B build -DCMAKE_INSTALL_PREFIX=/usr
+cmake -B build -DCMAKE_INSTALL_PREFIX=/usr/local
 cmake --build build
 sudo cmake --install build
+```
 
-# Or install just the plasmoid for your user
-kpackagetool6 -t Plasma/Applet -i build/pkg/org.kde.whatcable
+### Install the GNOME Shell extension
+
+The extension lives in [`gnome-extension/`](gnome-extension/). It targets GNOME Shell 45+.
+
+```bash
+cd gnome-extension
+make install                                    # installs to ~/.local/share/gnome-shell/extensions/
+# Restart GNOME Shell:
+#   - Wayland: log out and log back in
+#   - X11: Alt+F2, then type 'r' and press Enter
+gnome-extensions enable whatcable@whatcable.local
+```
+
+To install system-wide instead:
+
+```bash
+sudo make install-system
+```
+
+Or build a zip suitable for `gnome-extensions install`:
+
+```bash
+cd gnome-extension
+make pack
+gnome-extensions install --force whatcable@whatcable.local.shell-extension.zip
 ```
 
 ### CLI only
@@ -64,7 +90,7 @@ whatcable-linux --help
 
 ## How it works
 
-WhatCable-Linux reads three areas of the Linux sysfs virtual filesystem. No root access required for basic info:
+WhatCable-GNOME reads three areas of the Linux sysfs virtual filesystem. No root access required for basic info:
 
 | sysfs path | What it gives us |
 |---|---|
@@ -73,6 +99,8 @@ WhatCable-Linux reads three areas of the Linux sysfs virtual filesystem. No root
 | `/sys/class/usb_power_delivery/` | PD negotiation: PDO list from charger, active profile, PPS ranges |
 
 Hotplug monitoring uses `libudev` to detect connect/disconnect events in real time.
+
+The GNOME Shell extension is a pure-GJS panel indicator that periodically invokes `whatcable-linux --json` and renders the result in a popup menu. Keeping all sysfs / PD decoding in the C++ CLI means the same logic powers both the CLI and the extension, and the extension itself stays small and easy to audit.
 
 Cable speed and power decoding follow the USB Power Delivery 3.x spec, ported from the original WhatCable's Swift implementation.
 
@@ -85,7 +113,7 @@ Cable speed and power decoding follow the USB Power Delivery 3.x spec, ported fr
 
 ## Credits
 
-WhatCable-Linux is a port of [WhatCable](https://github.com/darrylmorley/whatcable) by [Darryl Morley](https://github.com/darrylmorley). The USB Power Delivery decoding logic, charging diagnostics, vendor database, and plain-English summary approach are derived from the original macOS app.
+WhatCable-GNOME is a port of [WhatCable](https://github.com/darrylmorley/whatcable) by [Darryl Morley](https://github.com/darrylmorley). The USB Power Delivery decoding logic, charging diagnostics, vendor database, and plain-English summary approach are derived from the original macOS app.
 
 ## License
 
