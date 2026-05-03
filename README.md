@@ -85,6 +85,26 @@ All the actual work — reading `/sys/bus/usb/devices/`, `/sys/class/typec/`, `/
 - **WhatCable trusts the e-marker.** Counterfeit or mis-flashed cables can lie about their capabilities.
 - **Vendor name lookup is not exhaustive.** Common vendors are recognized; others show the hex VID.
 
+## dev notes
+
+### todo
+
+* add shexli to makefile
+* add shexli to release-job 
+* validate readme
+* testing with many devices/cable
+* testing with newer gnome versions
+* compare with upstream and implement feature/ui/etc. 
+
+### release process
+
+1. push to main
+2. create release tag
+3. wait for gha release build
+4. download zip file
+5. `uvx shexli whatcable-gnome-extension-v0.1.0.zip`
+6. https://extensions.gnome.org/upload/
+
 ## Credits
 
 WhatCable-GNOME is a port of [WhatCable](https://github.com/darrylmorley/whatcable) by [Darryl Morley](https://github.com/darrylmorley). The USB Power Delivery decoding logic, charging diagnostics, vendor database, and plain-English summary approach are derived from the original macOS app, via the [`whatcable-linux`](https://github.com/Zetaphor/whatcable-linux) CLI port.
