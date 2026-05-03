@@ -1,0 +1,8 @@
+{
+  "env": {
+    "NO_COLOR": "1",
+    "CI": "true",
+    "UV_NO_PROGRESS": "1",
+    "PYTHONDONTWRITEBYTECODE": "1"
+  }
+}
