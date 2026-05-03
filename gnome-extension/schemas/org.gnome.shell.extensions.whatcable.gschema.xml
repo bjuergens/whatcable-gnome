@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.whatcable"
+          path="/org/gnome/shell/extensions/whatcable/">
+    <key name="show-empty-ports" type="b">
+      <default>false</default>
+      <summary>Show empty USB-C ports</summary>
+      <description>If true, list USB-C ports that have no device connected.</description>
+    </key>
+    <key name="show-internal-devices" type="b">
+      <default>false</default>
+      <summary>Show fixed internal USB devices</summary>
+      <description>If true, include built-in (non-removable) USB devices such as internal hubs and webcams.</description>
+    </key>
+  </schema>
+</schemalist>

@@ -9,85 +9,57 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
-    container:
-      image: fedora:43
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install schema compiler
         run: |
-          dnf install -y gcc-c++ cmake \
-            qt6-qtbase-devel \
-            systemd-devel tar gzip zip
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-bin zip jq
 
-      - name: Configure
-        run: cmake -B build -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        run: cmake --build build --parallel
-
-      - name: Package CLI binary
-        run: |
-          mkdir -p build/dist
-          cp build/src/cli/whatcable-linux build/dist/
-          cd build/dist
-          tar czf ../whatcable-linux-cli-${GITHUB_REF_NAME}-x86_64.tar.gz whatcable-linux
-
-      - name: Package GNOME Shell extension
+      - name: Pack extension
         run: |
           cd gnome-extension
-          zip -j ../build/whatcable-gnome-extension-${GITHUB_REF_NAME}.zip \
-            metadata.json extension.js stylesheet.css
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-assets
-          path: |
-            build/whatcable-linux-cli-*.tar.gz
-            build/whatcable-gnome-extension-*.zip
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-assets
-          path: assets
+          # buildinfo.json embeds the build timestamp shown in the Debug submenu.
+          printf '{"buildTime": "%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > buildinfo.json
+          glib-compile-schemas schemas/
+          UUID=$(jq -r .uuid metadata.json)
+          ZIP="../whatcable-gnome-extension-${GITHUB_REF_NAME}.zip"
+          zip -r "${ZIP}" \
+            metadata.json extension.js prefs.js stylesheet.css buildinfo.json \
+            schemas/org.gnome.shell.extensions.whatcable.gschema.xml \
+            schemas/gschemas.compiled
+          # Sanity check: the zip must have files at the root, not nested under
+          # a directory — that's what extensions.gnome.org requires.
+          unzip -l "${ZIP}"
+          echo "UUID=${UUID}" >> "${GITHUB_ENV}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           body: |
-            ## Release Assets
+            ## Release Asset
 
             | File | Description |
             |------|-------------|
-            | `whatcable-linux-cli-${{ github.ref_name }}-x86_64.tar.gz` | Standalone CLI binary. Extract and run `./whatcable-linux`. |
-            | `whatcable-gnome-extension-${{ github.ref_name }}.zip` | GNOME Shell extension. Install with `gnome-extensions install --force <file>`. Requires the CLI on `$PATH`. |
+            | `whatcable-gnome-extension-${{ github.ref_name }}.zip` | GNOME Shell extension. Install with `gnome-extensions install --force <file>`. |
 
-            ### Quick install (CLI)
+            ### Requirements
 
-            ```bash
-            tar xzf whatcable-linux-cli-${{ github.ref_name }}-x86_64.tar.gz
-            sudo mv whatcable-linux /usr/local/bin/
-            ```
+            The extension shells out to the `whatcable-linux` CLI. Install it from
+            [Zetaphor/whatcable-linux](https://github.com/Zetaphor/whatcable-linux)
+            and make sure the binary is on your `$PATH` (or in `/usr/local/bin` / `/usr/bin`)
+            before enabling the extension.
 
-            ### Quick install (GNOME extension)
+            ### Quick install
 
             ```bash
             gnome-extensions install --force whatcable-gnome-extension-${{ github.ref_name }}.zip
             # Restart GNOME Shell (log out / back in on Wayland)
-            gnome-extensions enable whatcable@whatcable.local
+            gnome-extensions enable whatcable@gnome.overthrow905.passmail.net
             ```
           files: |
-            assets/**/*.tar.gz
-            assets/**/*.zip
+            whatcable-gnome-extension-*.zip

@@ -2,9 +2,11 @@
 
 > **What can this USB cable actually do?**
 
-A GNOME Shell extension and CLI tool that tells you, in plain English, what each USB device plugged into your Linux machine can actually do.
+A GNOME Shell extension that tells you, in plain English, what each USB device plugged into your Linux machine can actually do.
 
 **WhatCable-GNOME is a GNOME port of [WhatCable](https://github.com/darrylmorley/whatcable), a macOS menu bar app by [Darryl Morley](https://github.com/darrylmorley).** It expands the original USB-C focus to cover all USB devices, while preserving the rich USB-C Power Delivery diagnostics from the original.
+
+The extension is a thin shell over the [`whatcable-linux`](https://github.com/Zetaphor/whatcable-linux) CLI, which does the actual sysfs reading and PD decoding.
 
 ![WhatCable-GNOME](screenshot.png)
 
@@ -28,29 +30,15 @@ A GNOME Shell extension and CLI tool that tells you, in plain English, what each
 
 ## Install
 
-### Build the CLI
+### 1. Install the `whatcable-linux` CLI
 
-The GNOME extension shells out to the `whatcable-linux` CLI, so build and install that first.
+The extension shells out to the `whatcable-linux` binary on your `$PATH` (or `/usr/local/bin` / `/usr/bin`). Follow the install instructions at <https://github.com/Zetaphor/whatcable-linux>. Upstream is young — its build steps may simplify or move to package managers over time, so check there for the latest.
 
-```bash
-# Install dependencies (Fedora)
-sudo dnf install gcc-c++ cmake qt6-qtbase-devel systemd-devel
+The extension was last verified against `whatcable-linux 0.1.1`. The currently-installed version is shown in the extension's *Debug info* submenu next to the known-good version, so you can spot a mismatch.
 
-# Install dependencies (Arch/Manjaro)
-sudo pacman -S base-devel cmake qt6-base systemd-libs
+### 2. Install the GNOME Shell extension
 
-# Install dependencies (Debian/Ubuntu)
-sudo apt install build-essential cmake qt6-base-dev libudev-dev pkg-config
-
-# Build
-cmake -B build -DCMAKE_INSTALL_PREFIX=/usr/local
-cmake --build build
-sudo cmake --install build
-```
-
-### Install the GNOME Shell extension
-
-The extension lives in [`gnome-extension/`](gnome-extension/). It targets GNOME Shell 45+.
+It targets GNOME Shell 45+.
 
 ```bash
 cd gnome-extension
@@ -58,7 +46,7 @@ make install                                    # installs to ~/.local/share/gno
 # Restart GNOME Shell:
 #   - Wayland: log out and log back in
 #   - X11: Alt+F2, then type 'r' and press Enter
-gnome-extensions enable whatcable@whatcable.local
+gnome-extensions enable whatcable@gnome.overthrow905.passmail.net
 ```
 
 To install system-wide instead:
@@ -67,50 +55,28 @@ To install system-wide instead:
 sudo make install-system
 ```
 
-Or build a zip suitable for `gnome-extensions install`:
+Or build a zip suitable for `gnome-extensions install` (the same zip we upload to extensions.gnome.org):
 
 ```bash
 cd gnome-extension
 make pack
-gnome-extensions install --force whatcable@whatcable.local.shell-extension.zip
+gnome-extensions install --force whatcable@gnome.overthrow905.passmail.net.shell-extension.zip
 ```
 
-### CLI only
+### Quick local test
 
-After building, the `whatcable-linux` binary is in `build/src/cli/`:
-
-```bash
-whatcable-linux              # human-readable summary of every USB device
-whatcable-linux --json       # structured JSON output
-whatcable-linux --watch      # stream updates as devices come and go
-whatcable-linux --raw        # include raw sysfs attributes
-whatcable-linux --version
-whatcable-linux --help
-```
-
-### quick local test
-
-rebuild, reinstall and start a new gnome shell in a window with the new version
+Rebuild + reinstall + start a nested GNOME Shell window with the new version:
 
 ```bash
-cmake -B build -DCMAKE_INSTALL_PREFIX=/usr/local && cmake --build build&&sudo cmake --install build && cd gnome-extension && make install && cd .. && MUTTER_DEBUG_DUMMY_MODE_SPECS=1600x1000 dbus-run-session -- gnome-shell --nested --wayland
+cd gnome-extension && make install && cd .. && \
+MUTTER_DEBUG_DUMMY_MODE_SPECS=1600x1000 dbus-run-session -- gnome-shell --nested --wayland
 ```
 
 ## How it works
 
-WhatCable-GNOME reads three areas of the Linux sysfs virtual filesystem. No root access required for basic info:
+WhatCable-GNOME is a pure-GJS panel indicator. It periodically invokes `whatcable-linux --json` via `Gio.Subprocess` and renders the parsed JSON into a popup menu. Each entry in the JSON output becomes a sub-menu with the device's headline, bullets, charging diagnostics, and (for chargers) the full PDO list. Output is permissively validated — malformed entries become a warning row instead of breaking the menu.
 
-| sysfs path | What it gives us |
-|---|---|
-| `/sys/bus/usb/devices/` | All USB devices: vendor, product, speed, power, class, interfaces, topology |
-| `/sys/class/typec/` | USB-C port state: connection, roles, cable e-marker, partner identity |
-| `/sys/class/usb_power_delivery/` | PD negotiation: PDO list from charger, active profile, PPS ranges |
-
-Hotplug monitoring uses `libudev` to detect connect/disconnect events in real time.
-
-The GNOME Shell extension is a pure-GJS panel indicator that periodically invokes `whatcable-linux --json` and renders the result in a popup menu. Keeping all sysfs / PD decoding in the C++ CLI means the same logic powers both the CLI and the extension, and the extension itself stays small and easy to audit.
-
-Cable speed and power decoding follow the USB Power Delivery 3.x spec, ported from the original WhatCable's Swift implementation.
+All the actual work — reading `/sys/bus/usb/devices/`, `/sys/class/typec/`, `/sys/class/usb_power_delivery/`, decoding USB PD VDOs, identifying charging bottlenecks — lives in the upstream CLI. Keeping the extension thin makes it small and easy to audit (which matters for the GNOME Extensions review process).
 
 ## Caveats
 
@@ -121,7 +87,7 @@ Cable speed and power decoding follow the USB Power Delivery 3.x spec, ported fr
 
 ## Credits
 
-WhatCable-GNOME is a port of [WhatCable](https://github.com/darrylmorley/whatcable) by [Darryl Morley](https://github.com/darrylmorley). The USB Power Delivery decoding logic, charging diagnostics, vendor database, and plain-English summary approach are derived from the original macOS app.
+WhatCable-GNOME is a port of [WhatCable](https://github.com/darrylmorley/whatcable) by [Darryl Morley](https://github.com/darrylmorley). The USB Power Delivery decoding logic, charging diagnostics, vendor database, and plain-English summary approach are derived from the original macOS app, via the [`whatcable-linux`](https://github.com/Zetaphor/whatcable-linux) CLI port.
 
 ## License
 

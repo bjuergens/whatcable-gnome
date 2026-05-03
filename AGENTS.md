@@ -2,89 +2,69 @@
 
 ## Project Overview
 
-WhatCable-GNOME is a GNOME port of [WhatCable](https://github.com/darrylmorley/whatcable) (macOS) by Darryl Morley. It is a GNOME Shell extension + CLI tool that shows USB device and USB-C cable information by reading Linux sysfs.
+WhatCable-GNOME is a GNOME Shell extension. It surfaces USB device and USB-C cable information in the panel by shelling out to the upstream [`whatcable-linux`](https://github.com/Zetaphor/whatcable-linux) CLI and rendering its `--json` output. This repo no longer contains C++ source — that lives upstream.
+
+The original macOS app is [WhatCable](https://github.com/darrylmorley/whatcable) by Darryl Morley.
 
 ## Architecture
 
-Three components, with the extension talking to the CLI rather than linking to the C++ core directly:
+One component:
 
-- **`src/core/`** — `libwhatcablecore`, a static C++ library. Reads sysfs, decodes USB PD data, and produces human-readable summaries. No Qt GUI dependencies — only Qt6::Core.
-- **`src/cli/`** — `whatcable-linux` CLI binary. Uses the core library. Supports `--json`, `--watch`, `--raw`. The `--json` output is the contract the GNOME extension consumes.
-- **`gnome-extension/`** — GNOME Shell extension (GJS, ESM, GNOME 45+). A `PanelMenu.Button` indicator that spawns `whatcable-linux --json` via `Gio.Subprocess` and renders the parsed JSON into a popup menu.
+- **`gnome-extension/`** — GNOME Shell extension (GJS, ESM, GNOME 45+). A `PanelMenu.Button` indicator that spawns `whatcable-linux --json` via `Gio.Subprocess` and renders the parsed JSON into a popup menu. Persistent prefs (`show-empty-ports`, `show-internal-devices`) live in GSettings.
 
-## Key Data Flow
+The extension treats the CLI's JSON output as an external contract. Every field is permissively validated in `validateDevice()` before rendering — malformed entries become a warning row rather than crashing the menu. When upstream changes its JSON shape, fixes go in `validateDevice()` and `_buildDeviceItem()`.
 
-```
-/sys/bus/usb/devices/         → UsbDevice.cpp
-/sys/class/typec/             → TypeCPort.cpp
-/sys/class/usb_power_delivery/ → PowerDelivery.cpp
-                                    ↓
-                              DeviceManager.cpp  ← UDevMonitor.cpp (hotplug)
-                                    ↓
-                              DeviceSummary.cpp (plain-English output)
-                                    ↓
-                        CLI (main.cpp) ──── --json ────▶ extension.js (GNOME Shell)
-```
+## Code Conventions (GJS)
 
-## Code Conventions
-
-### C++ (core / CLI)
-- C++20, Qt 6 style. Use `QStringLiteral()` for string literals.
-- All core classes are in the `WhatCable` namespace.
-- sysfs reads go through `SysfsReader` — never read `/sys/` directly with raw file I/O.
-- Source files derived from the original Swift code must keep the attribution header: `// Derived from WhatCable by Darryl Morley (https://github.com/darrylmorley/whatcable)`
-- Handle missing sysfs paths gracefully — return empty/nullopt, never crash. Many systems lack `/sys/class/typec/` or `/sys/class/usb_power_delivery/`.
-
-### GNOME Shell extension (GJS)
 - Target GNOME Shell 45+ — use ESM `import` syntax and `resource:///org/gnome/shell/...` paths.
 - Subclass `PanelMenu.Button` via `GObject.registerClass`.
 - Use `Gio.Subprocess` async APIs to call the CLI; never block the shell's main loop.
-- Tear down all `GLib.timeout_add*` sources in `destroy()` / `disable()`.
-- Keep the extension thin: any new device decoding belongs in the C++ core, then surfaces through the CLI's JSON.
+- Disconnect every settings/signal connection in `destroy()` / `disable()`.
+- Don't add npm/JS dependencies — extensions.gnome.org ships source-only and rejects bundlers.
 
-## Build
+## Build / Install
+
+The extension is plain JS, CSS, and a GSettings schema XML. No CMake, no compiler.
 
 ```bash
-cmake -B build
-cmake --build build
+cd gnome-extension
+make install        # installs to ~/.local/share/gnome-shell/extensions/, also compiles schemas/
+make pack           # produces a zip suitable for extensions.gnome.org upload
 ```
 
-The build produces the core library and CLI. The GNOME extension is plain JS/CSS and does not need CMake — install it from `gnome-extension/` with `make install`.
+After `make install`, restart GNOME Shell (Alt+F2 → `r` on X11, log out on Wayland) and run:
+
+```
+gnome-extensions enable whatcable@gnome.overthrow905.passmail.net
+```
 
 ## Testing
 
-- Run the CLI: `./build/src/cli/whatcable-linux`
-- JSON output (the contract the extension depends on): `./build/src/cli/whatcable-linux --json`
-- Watch mode: `./build/src/cli/whatcable-linux --watch`
-- Extension install (user): `cd gnome-extension && make install` then restart the shell and `gnome-extensions enable whatcable@whatcable.local`
 - Live extension logs: `journalctl /usr/bin/gnome-shell -f`
+- Nested shell for fast iteration: `MUTTER_DEBUG_DUMMY_MODE_SPECS=1600x1000 dbus-run-session -- gnome-shell --nested --wayland`
+- Open the prefs window: `gnome-extensions prefs whatcable@gnome.overthrow905.passmail.net`
 
-## Key Files to Know
+To exercise the JSON validation paths, point a shell wrapper at `whatcable-linux` that emits malformed payloads (non-array root, devices missing `headline`, etc.) and confirm the panel either shows a top-level error or a per-device warning row.
+
+## Known-good CLI version
+
+`extension.js` has a `KNOWN_GOOD_CLI_VERSION` constant. Bump it whenever a new upstream `whatcable-linux` release is verified against this extension. The value is shown in the *Debug info* submenu next to the actual installed version so users can spot a mismatch.
+
+## Key Files
 
 | File | Purpose |
 |---|---|
-| `src/core/UsbDevice.h/cpp` | Enumerates all USB devices from `/sys/bus/usb/devices/` |
-| `src/core/TypeCPort.h/cpp` | Reads USB-C port state from `/sys/class/typec/` |
-| `src/core/PDDecoder.h/cpp` | USB PD VDO bit-field decoding (ported from PDVDO.swift) |
-| `src/core/PowerDelivery.h/cpp` | Parses PDO lists from `/sys/class/usb_power_delivery/` |
-| `src/core/DeviceSummary.h/cpp` | Generates headlines, subtitles, bullets per device |
-| `src/core/ChargingDiagnostic.h/cpp` | Identifies USB-C charging bottlenecks |
-| `src/core/DeviceManager.h/cpp` | Aggregates all sources, correlates data, owns refresh logic |
-| `src/core/UDevMonitor.h/cpp` | libudev hotplug monitoring |
-| `src/core/VendorDB.h/cpp` | USB VID → vendor name lookup |
-| `src/core/UsbClassDB.h/cpp` | USB class code → human name |
-| `src/cli/main.cpp` | CLI entry point; defines the `--json` schema consumed by the extension |
-| `gnome-extension/extension.js` | GNOME Shell panel indicator and popup |
-| `gnome-extension/metadata.json` | Extension manifest (uuid, supported shell versions) |
+| `gnome-extension/extension.js` | Panel indicator, JSON validator, settings wiring |
+| `gnome-extension/prefs.js` | Adw preferences window |
+| `gnome-extension/schemas/org.gnome.shell.extensions.whatcable.gschema.xml` | GSettings schema (booleans for the two visibility toggles) |
+| `gnome-extension/metadata.json` | Extension manifest (UUID, supported shell versions, settings-schema) |
+| `gnome-extension/Makefile` | install / install-system / pack targets; compiles schemas |
+| `.github/workflows/release.yml` | Tagged builds produce the EGO upload zip |
 
-## Adding New Vendors
+## Adding new fields from upstream JSON
 
-Add entries to the `kVendors` map in `src/core/VendorDB.cpp`. Format: `{0xVID, QStringLiteral("Vendor Name")}`.
+When upstream `whatcable-linux` adds a field to `--json`:
 
-## Adding New USB Class Codes
-
-Add cases to `UsbClassDB::className()` or `interfaceClassName()` in `src/core/UsbClassDB.cpp`.
-
-## Extending the JSON Contract
-
-When adding a new field to the CLI's JSON output (`src/cli/main.cpp`), make sure `gnome-extension/extension.js` either consumes it or safely ignores it. The extension treats all sub-objects (`charging`, `powerDelivery`, `cable`, `typec`, `usb`) as optional.
+1. Add it to `validateDevice()` in `extension.js` with the appropriate type guard.
+2. Render it in `_buildDeviceItem()`.
+3. Bump `KNOWN_GOOD_CLI_VERSION` to the upstream release that introduced the field.

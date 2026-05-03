@@ -1,13 +1,17 @@
-UUID := whatcable@whatcable.local
+UUID := whatcable@gnome.overthrow905.passmail.net
 USER_EXT_DIR := $(HOME)/.local/share/gnome-shell/extensions/$(UUID)
 SYSTEM_EXT_DIR := $(DESTDIR)/usr/share/gnome-shell/extensions/$(UUID)
 
-FILES := metadata.json extension.js stylesheet.css buildinfo.json
+FILES := metadata.json extension.js prefs.js stylesheet.css buildinfo.json
+SCHEMA_XML := schemas/org.gnome.shell.extensions.whatcable.gschema.xml
 
-.PHONY: install install-user install-system uninstall pack buildinfo help
+.PHONY: install install-user install-system uninstall pack buildinfo schemas help
 
 buildinfo:
 	@printf '{"buildTime": "%s"}\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" > buildinfo.json
+
+schemas:
+	glib-compile-schemas schemas/
 
 help:
 	@echo "Targets:"
@@ -19,16 +23,18 @@ help:
 
 install: install-user
 
-install-user: buildinfo
+install-user: buildinfo schemas
 	mkdir -p "$(USER_EXT_DIR)"
 	cp $(FILES) "$(USER_EXT_DIR)/"
+	cp -r schemas "$(USER_EXT_DIR)/"
 	@echo "Installed to $(USER_EXT_DIR)"
 	@echo "Restart GNOME Shell (Alt+F2 -> r on X11, or log out on Wayland),"
 	@echo "then enable with: gnome-extensions enable $(UUID)"
 
-install-system: buildinfo
+install-system: buildinfo schemas
 	mkdir -p "$(SYSTEM_EXT_DIR)"
 	cp $(FILES) "$(SYSTEM_EXT_DIR)/"
+	cp -r schemas "$(SYSTEM_EXT_DIR)/"
 
 uninstall:
 	rm -rf "$(USER_EXT_DIR)"
@@ -37,4 +43,6 @@ pack: buildinfo
 	gnome-extensions pack --force \
 		--extra-source=stylesheet.css \
 		--extra-source=buildinfo.json \
+		--extra-source=prefs.js \
+		--schema=$(SCHEMA_XML) \
 		.

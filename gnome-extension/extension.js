@@ -19,6 +19,65 @@ const CLI_CANDIDATES = [
     '/usr/bin/whatcable-linux',
 ];
 
+// Bumped manually when a new upstream `whatcable-linux` release has been
+// verified to work with this extension. Shown in the debug submenu so users
+// can compare against the version they actually have installed.
+const KNOWN_GOOD_CLI_VERSION = '0.1.1';
+
+// Permissive shape check for one device entry from the CLI's --json output.
+// Returns {ok: true, device} where `device` is a sanitized copy holding only
+// well-typed fields (so a wrong-typed optional field degrades to "missing"
+// rather than throwing in `_buildDeviceItem`), or {ok: false, summary} if the
+// entry can't be rendered at all (no headline).
+function validateDevice(d) {
+    if (!d || typeof d !== 'object' || Array.isArray(d))
+        return {ok: false, summary: 'not an object'};
+    if (typeof d.headline !== 'string' || d.headline.length === 0)
+        return {ok: false, summary: 'missing headline'};
+
+    const out = {headline: d.headline};
+
+    if (typeof d.category === 'string') out.category = d.category;
+    if (typeof d.subtitle === 'string') out.subtitle = d.subtitle;
+
+    if (Array.isArray(d.bullets))
+        out.bullets = d.bullets.filter(b => typeof b === 'string');
+
+    if (d.typec && typeof d.typec === 'object' && !Array.isArray(d.typec)) {
+        out.typec = {};
+        if (typeof d.typec.connected === 'boolean')
+            out.typec.connected = d.typec.connected;
+    }
+
+    if (d.usb && typeof d.usb === 'object' && !Array.isArray(d.usb)) {
+        out.usb = {};
+        if (typeof d.usb.removable === 'string')
+            out.usb.removable = d.usb.removable;
+    }
+
+    if (d.charging && typeof d.charging === 'object' && !Array.isArray(d.charging)) {
+        const c = {};
+        if (typeof d.charging.summary === 'string') c.summary = d.charging.summary;
+        if (typeof d.charging.isWarning === 'boolean') c.isWarning = d.charging.isWarning;
+        if (typeof d.charging.detail === 'string') c.detail = d.charging.detail;
+        if (c.summary) out.charging = c;
+    }
+
+    if (d.powerDelivery && typeof d.powerDelivery === 'object' &&
+        Array.isArray(d.powerDelivery.sourceCapabilities)) {
+        const pdos = d.powerDelivery.sourceCapabilities.filter(p =>
+            p && typeof p === 'object' &&
+            typeof p.voltageMV === 'number' &&
+            typeof p.currentMA === 'number' &&
+            typeof p.powerMW === 'number' &&
+            typeof p.active === 'boolean');
+        if (pdos.length > 0)
+            out.powerDelivery = {sourceCapabilities: pdos};
+    }
+
+    return {ok: true, device: out};
+}
+
 function findCliPath() {
     for (const candidate of CLI_CANDIDATES) {
         if (candidate.startsWith('/')) {
@@ -79,7 +138,7 @@ function readBuildTime(extensionPath) {
 
 const WhatCableIndicator = GObject.registerClass(
 class WhatCableIndicator extends PanelMenu.Button {
-    _init(extensionPath) {
+    _init(extensionPath, settings) {
         super._init(0.0, 'WhatCable');
         this._disposed = false;
         this._inFlight = false;
@@ -88,8 +147,13 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._buildTime = readBuildTime(extensionPath);
         this._cliVersion = null;
         this._lastRefreshTime = null;
-        this._showEmptyPorts = false;
-        this._showInternalDevices = false;
+        this._settings = settings;
+        this._settingsChangedIds = [
+            this._settings.connect('changed::show-empty-ports',
+                () => this._rerenderDevices()),
+            this._settings.connect('changed::show-internal-devices',
+                () => this._rerenderDevices()),
+        ];
         this._lastDevices = null;
 
         const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
@@ -139,19 +203,31 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._debugMenu = new PopupMenu.PopupSubMenuMenuItem('Debug info');
         this._buildTimeItem = new PopupMenu.PopupMenuItem('', {reactive: false});
         this._cliVersionItem = new PopupMenu.PopupMenuItem('', {reactive: false});
+        this._knownGoodItem = new PopupMenu.PopupMenuItem(
+            `Known good whatcable-linux: ${KNOWN_GOOD_CLI_VERSION}`,
+            {reactive: false});
         this._lastRefreshItem = new PopupMenu.PopupMenuItem('', {reactive: false});
         this._showEmptyPortsItem = this._makeStickySwitch(
-            'Show empty ports', this._showEmptyPorts, state => {
-                this._showEmptyPorts = state;
-                this._rerenderDevices();
-            });
+            'Show empty ports', this._settings.get_boolean('show-empty-ports'),
+            state => this._settings.set_boolean('show-empty-ports', state));
         this._showInternalDevicesItem = this._makeStickySwitch(
-            'Show internal devices', this._showInternalDevices, state => {
-                this._showInternalDevices = state;
-                this._rerenderDevices();
-            });
+            'Show internal devices', this._settings.get_boolean('show-internal-devices'),
+            state => this._settings.set_boolean('show-internal-devices', state));
+        // Keep the in-menu switches in sync with settings changes coming from
+        // elsewhere (the prefs window, dconf, etc.).
+        this._settingsChangedIds.push(
+            this._settings.connect('changed::show-empty-ports', () => {
+                this._showEmptyPortsItem.setToggleState(
+                    this._settings.get_boolean('show-empty-ports'));
+            }),
+            this._settings.connect('changed::show-internal-devices', () => {
+                this._showInternalDevicesItem.setToggleState(
+                    this._settings.get_boolean('show-internal-devices'));
+            }),
+        );
         this._debugMenu.menu.addMenuItem(this._buildTimeItem);
         this._debugMenu.menu.addMenuItem(this._cliVersionItem);
+        this._debugMenu.menu.addMenuItem(this._knownGoodItem);
         this._debugMenu.menu.addMenuItem(this._lastRefreshItem);
         this._debugMenu.menu.addMenuItem(this._showEmptyPortsItem);
         this._debugMenu.menu.addMenuItem(this._showInternalDevicesItem);
@@ -163,7 +239,7 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._buildTimeItem.label.text =
             `Extension build: ${this._buildTime ?? 'unknown'}`;
         this._cliVersionItem.label.text =
-            `whatcable-linux: ${this._cliVersion ?? 'unknown'}`;
+            `Installed whatcable-linux: ${this._cliVersion ?? 'unknown'}`;
         this._lastRefreshItem.label.text =
             `Last refresh: ${this._lastRefreshTime ?? 'never'}`;
     }
@@ -201,16 +277,21 @@ class WhatCableIndicator extends PanelMenu.Button {
                 this._showError(error);
                 return;
             }
-            let devices;
+            let parsed;
             try {
-                devices = JSON.parse(stdout);
+                parsed = JSON.parse(stdout);
             } catch (e) {
                 this._showError(`Failed to parse CLI output: ${e.message}`);
                 return;
             }
+            if (!Array.isArray(parsed)) {
+                this._showError('CLI returned unexpected payload (not a JSON array). ' +
+                    `Try a known-good whatcable-linux ≥ ${KNOWN_GOOD_CLI_VERSION}.`);
+                return;
+            }
             this._lastRefreshTime = new Date().toLocaleTimeString();
             this._updateDebugItems();
-            this._showDevices(devices ?? []);
+            this._showDevices(parsed);
         });
     }
 
@@ -241,30 +322,57 @@ class WhatCableIndicator extends PanelMenu.Button {
 
     _showDevices(devices) {
         this._lastDevices = devices;
-        const filtered = devices.filter(d => {
-            if (!this._showEmptyPorts &&
+
+        const showEmptyPorts = this._settings.get_boolean('show-empty-ports');
+        const showInternalDevices = this._settings.get_boolean('show-internal-devices');
+
+        // Validate first, then filter. Invalid entries become warning rows so
+        // a single malformed device never breaks the rest of the menu.
+        const entries = devices.map(d => {
+            const result = validateDevice(d);
+            return result.ok ? {kind: 'ok', device: result.device}
+                              : {kind: 'bad', summary: result.summary};
+        }).filter(entry => {
+            if (entry.kind !== 'ok') return true;
+            const d = entry.device;
+            if (!showEmptyPorts &&
                 d.category === 'typec' && d.typec && !d.typec.connected)
                 return false;
-            if (!this._showInternalDevices &&
+            if (!showInternalDevices &&
                 d.category !== 'typec' && d.usb?.removable === 'fixed')
                 return false;
             return true;
         });
 
-        const signature = JSON.stringify(filtered);
+        const signature = JSON.stringify(entries);
         if (signature === this._lastSignature)
             return;
         this._lastSignature = signature;
 
-        const count = filtered.length;
-        this._countLabel.text = count > 0 ? ` ${count}` : '';
-        this._statusItem.label.text = count === 0
-            ? 'No USB devices found'
-            : `${count} USB device${count === 1 ? '' : 's'}`;
+        const validCount = entries.filter(e => e.kind === 'ok').length;
+        const badCount = entries.length - validCount;
+        this._countLabel.text = validCount > 0 ? ` ${validCount}` : '';
+        if (validCount === 0 && badCount === 0) {
+            this._statusItem.label.text = 'No USB devices found';
+        } else {
+            const parts = [`${validCount} USB device${validCount === 1 ? '' : 's'}`];
+            if (badCount > 0)
+                parts.push(`${badCount} malformed`);
+            this._statusItem.label.text = parts.join(', ');
+        }
 
         this._devicesSection.removeAll();
-        for (const dev of filtered)
-            this._devicesSection.addMenuItem(this._buildDeviceItem(dev));
+        for (const entry of entries) {
+            if (entry.kind === 'ok') {
+                this._devicesSection.addMenuItem(this._buildDeviceItem(entry.device));
+            } else {
+                const item = new PopupMenu.PopupMenuItem(
+                    `⚠ Malformed device entry (${entry.summary})`,
+                    {reactive: false});
+                item.label.style_class = 'whatcable-warning';
+                this._devicesSection.addMenuItem(item);
+            }
+        }
     }
 
     _buildDeviceItem(dev) {
@@ -318,13 +426,19 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._disposed = true;
         this._cancellable?.cancel();
         this._cancellable = null;
+        if (this._settings && this._settingsChangedIds) {
+            for (const id of this._settingsChangedIds)
+                this._settings.disconnect(id);
+        }
+        this._settingsChangedIds = null;
+        this._settings = null;
         super.destroy();
     }
 });
 
 export default class WhatCableExtension extends Extension {
     enable() {
-        this._indicator = new WhatCableIndicator(this.path);
+        this._indicator = new WhatCableIndicator(this.path, this.getSettings());
         Main.panel.addToStatusArea(this.uuid, this._indicator);
     }
 
