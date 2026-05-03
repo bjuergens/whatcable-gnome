@@ -1,4 +1,4 @@
-UUID := whatcable@gnome.overthrow905.passmail.net
+UUID := whatcable@bjuergens.github.io
 USER_EXT_DIR := $(HOME)/.local/share/gnome-shell/extensions/$(UUID)
 SYSTEM_EXT_DIR := $(DESTDIR)/usr/share/gnome-shell/extensions/$(UUID)
 

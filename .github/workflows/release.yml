@@ -59,7 +59,7 @@ jobs:
             ```bash
             gnome-extensions install --force whatcable-gnome-extension-${{ github.ref_name }}.zip
             # Restart GNOME Shell (log out / back in on Wayland)
-            gnome-extensions enable whatcable@gnome.overthrow905.passmail.net
+            gnome-extensions enable ${{ env.UUID }}
             ```
           files: |
             whatcable-gnome-extension-*.zip

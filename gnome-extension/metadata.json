@@ -1,5 +1,5 @@
 {
-    "uuid": "whatcable@gnome.overthrow905.passmail.net",
+    "uuid": "whatcable@bjuergens.github.io",
     "name": "WhatCable",
     "description": "Shows what each USB cable and device can do. Lists every USB device with speed, power, and USB-C cable / Power Delivery details. Requires the whatcable-linux CLI from https://github.com/Zetaphor/whatcable-linux to be installed on PATH. Port of WhatCable (macOS) by Darryl Morley.",
     "shell-version": ["45", "46", "47", "48"],

@@ -46,7 +46,7 @@ make install                                    # installs to ~/.local/share/gno
 # Restart GNOME Shell:
 #   - Wayland: log out and log back in
 #   - X11: Alt+F2, then type 'r' and press Enter
-gnome-extensions enable whatcable@gnome.overthrow905.passmail.net
+gnome-extensions enable whatcable@bjuergens.github.io
 ```
 
 To install system-wide instead:
@@ -60,7 +60,7 @@ Or build a zip suitable for `gnome-extensions install` (the same zip we upload t
 ```bash
 cd gnome-extension
 make pack
-gnome-extensions install --force whatcable@gnome.overthrow905.passmail.net.shell-extension.zip
+gnome-extensions install --force whatcable@bjuergens.github.io.shell-extension.zip
 ```
 
 ### Quick local test
