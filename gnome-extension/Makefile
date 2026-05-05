@@ -46,3 +46,4 @@ pack: buildinfo
 		--extra-source=prefs.js \
 		--schema=$(SCHEMA_XML) \
 		.
+	uvx shexli $(UUID).shell-extension.zip

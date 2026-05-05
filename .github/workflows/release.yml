@@ -20,6 +20,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libglib2.0-bin zip jq
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
       - name: Pack extension
         run: |
           cd gnome-extension
@@ -36,6 +39,10 @@ jobs:
           # a directory — that's what extensions.gnome.org requires.
           unzip -l "${ZIP}"
           echo "UUID=${UUID}" >> "${GITHUB_ENV}"
+          echo "ZIP=${ZIP#../}" >> "${GITHUB_ENV}"
+
+      - name: Lint extension
+        run: uvx shexli "${ZIP}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

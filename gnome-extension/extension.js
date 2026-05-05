@@ -122,18 +122,20 @@ function runCliAsync(cliPath, args, cancellable, callback) {
     return proc;
 }
 
-function readBuildTime(extensionPath) {
-    try {
-        const file = Gio.File.new_for_path(`${extensionPath}/buildinfo.json`);
-        const [ok, contents] = file.load_contents(null);
-        if (!ok)
-            return null;
-        const decoder = new TextDecoder();
-        const parsed = JSON.parse(decoder.decode(contents));
-        return parsed.buildTime ?? null;
-    } catch (_e) {
-        return null;
-    }
+function readBuildTimeAsync(extensionPath, cancellable, callback) {
+    const file = Gio.File.new_for_path(`${extensionPath}/buildinfo.json`);
+    file.load_contents_async(cancellable, (f, res) => {
+        try {
+            const [, contents] = f.load_contents_finish(res);
+            const decoder = new TextDecoder();
+            const parsed = JSON.parse(decoder.decode(contents));
+            callback(parsed.buildTime ?? null);
+        } catch (e) {
+            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                return;
+            callback(null);
+        }
+    });
 }
 
 const WhatCableIndicator = GObject.registerClass(
@@ -144,7 +146,7 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._inFlight = false;
         this._cancellable = new Gio.Cancellable();
         this._cliPath = findCliPath();
-        this._buildTime = readBuildTime(extensionPath);
+        this._buildTime = null;
         this._cliVersion = null;
         this._lastRefreshTime = null;
         this._settings = settings;
@@ -171,10 +173,16 @@ class WhatCableIndicator extends PanelMenu.Button {
         this.add_child(box);
 
         this._buildMenu();
+        readBuildTimeAsync(extensionPath, this._cancellable, buildTime => {
+            if (this._disposed)
+                return;
+            this._buildTime = buildTime;
+            this._updateDebugItems();
+        });
         this._fetchCliVersion();
         this._refresh();
 
-        this.menu.connect('open-state-changed', (_menu, open) => {
+        this._menuOpenStateId = this.menu.connect('open-state-changed', (_menu, open) => {
             if (open)
                 this._refresh();
         });
@@ -426,6 +434,10 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._disposed = true;
         this._cancellable?.cancel();
         this._cancellable = null;
+        if (this._menuOpenStateId) {
+            this.menu.disconnect(this._menuOpenStateId);
+            this._menuOpenStateId = null;
+        }
         if (this._settings && this._settingsChangedIds) {
             for (const id of this._settingsChangedIds)
                 this._settings.disconnect(id);
