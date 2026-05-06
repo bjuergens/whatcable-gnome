@@ -31,16 +31,20 @@ async function readIdentity(path) {
         relevant.map(f => Sysfs.readHexAttribute(`${idPath}/${f}`)),
     );
 
-    const id = {vendorId: 0, productId: 0, vdos: []};
+    // Keyed by filename, not position. The kernel exposes id_header, cert_stat,
+    // product, product_type_vdo1..3 as named files; alphabetical iteration would
+    // put cert_stat (= PD VDO2) at index 0 and decoders that expect VDO1 at
+    // index 0 would silently decode the wrong word.
+    const id = {vendorId: 0, productId: 0, vdos: {}};
     relevant.forEach((name, i) => {
         const val = reads[i];
         if (val === null) return;
         if (name === 'id_header') id.vendorId = val & 0xFFFF;
         else if (name === 'product') id.productId = val & 0xFFFF;
-        id.vdos.push(val);
+        id.vdos[name] = val;
     });
 
-    if (id.vendorId === 0 && id.vdos.length === 0) return null;
+    if (id.vendorId === 0 && Object.keys(id.vdos).length === 0) return null;
     return id;
 }
 
@@ -84,6 +88,12 @@ async function readPort(path, name) {
         cable = {type: type ?? '', plugType: plugType ?? '', identity};
     }
 
+    // Kernel exposes the typec→PD association as a `usb_power_delivery`
+    // symlink (e.g. `/sys/class/typec/port0/usb_power_delivery -> ../../usb_power_delivery/source0`).
+    // We pick up the basename to pair with the PD port enumeration without
+    // guessing port indices.
+    const pdPortName = Sysfs.readSymlinkTargetBasename(`${path}/usb_power_delivery`);
+
     return {
         sysfsPath: path,
         portName: name,
@@ -95,6 +105,7 @@ async function readPort(path, name) {
         orientation: orientation ?? '',
         pdRevision: pdRevision ?? '',
         usbTypeCRev: usbTypeCRev ?? '',
+        pdPortName: pdPortName ?? null,
         partner,
         cable,
         hasPartner: partner !== null,

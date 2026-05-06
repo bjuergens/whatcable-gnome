@@ -116,8 +116,9 @@ export function fromTypeCPort(port, pdPort, cable) {
     }
 
     if (port.partner) {
-        if (port.partner.identity && port.partner.identity.vdos.length > 0) {
-            const hdr = decodeIDHeader(port.partner.identity.vdos[0]);
+        const idHeader = port.partner.identity?.vdos?.id_header;
+        if (idHeader !== undefined) {
+            const hdr = decodeIDHeader(idHeader);
             const productLabel = productTypeLabel(hdr.ufpProductType);
             const vendorLabel = lookupVendor(hdr.vendorId);
             const hasVendor = !vendorLabel.startsWith('0x');

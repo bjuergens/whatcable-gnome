@@ -9,9 +9,14 @@ import {fromTypeCCable} from './cable-info.js';
 import * as DeviceSummary from './device-summary.js';
 
 function pairPdPort(tcPort, pdPorts, typecCount) {
-    for (const pd of pdPorts) {
-        if (pd.parentPortNumber === tcPort.portNumber) return pd;
+    // Preferred: kernel's own typec→PD symlink (typec/portN/usb_power_delivery).
+    if (tcPort.pdPortName) {
+        for (const pd of pdPorts) {
+            if (pd.name === tcPort.pdPortName) return pd;
+        }
     }
+    // Fallback used when the kernel didn't expose the symlink (older drivers)
+    // and the topology is unambiguous.
     if (pdPorts.length === 1 && typecCount === 1) return pdPorts[0];
     return null;
 }

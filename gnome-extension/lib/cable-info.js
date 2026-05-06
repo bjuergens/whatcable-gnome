@@ -23,12 +23,15 @@ export function fromTypeCCable(cable) {
         info.vendorId = cable.identity.vendorId;
         info.vendorName = lookupVendor(cable.identity.vendorId);
 
-        if (cable.identity.vdos.length > 0) {
-            const hdr = decodeIDHeader(cable.identity.vdos[0]);
+        const idHeader = cable.identity.vdos.id_header;
+        // For cables, "Cable VDO" sits in product_type_vdo1 (PD VDO4) — see
+        // USB PD r3.x spec, Discover Identity response for SOP'.
+        const cableVdoRaw = cable.identity.vdos.product_type_vdo1;
+        if (idHeader !== undefined) {
+            const hdr = decodeIDHeader(idHeader);
             const active = hdr.ufpProductType === ProductType.ActiveCable;
-
-            if (cable.identity.vdos.length > 3) {
-                const cableVdo = decodeCableVDO(cable.identity.vdos[3], active);
+            if (cableVdoRaw !== undefined) {
+                const cableVdo = decodeCableVDO(cableVdoRaw, active);
                 info.speed = cableVdo.speed;
                 info.currentRating = cableVdo.currentRating;
                 info.maxWatts = cableVdo.maxWatts;

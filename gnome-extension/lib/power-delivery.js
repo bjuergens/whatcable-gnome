@@ -56,6 +56,11 @@ async function parsePdo(pdoPath, entryName) {
 
     return {
         index, type, voltageMV, maxVoltageMV, currentMA, powerMW,
+        // TODO: detect the active PDO. The kernel doesn't expose this directly
+        // via /sys/class/usb_power_delivery/; it lives in the negotiated PD
+        // request DO and is only reachable through driver-specific debugfs or
+        // PD trace events. Until then, every PDO renders as inactive and the
+        // charging diagnostic falls back to chargerMaxW for activeW.
         isActive: false,
         typeLabel: pdoTypeLabel(type),
     };
@@ -88,7 +93,6 @@ async function readPort(path, name) {
     return {
         sysfsPath: path,
         name,
-        parentPortNumber: -1,
         sourceCapabilities,
         sinkCapabilities,
         maxSourcePowerMW,
