@@ -2,43 +2,29 @@
 
 > **What can this USB cable actually do?**
 
-A GNOME Shell extension that tells you, in plain English, what each USB device plugged into your Linux machine can actually do.
+A GNOME Shell extension that tells you what each USB device or USB-C cable plugged into your Linux machine can actually do.
+
 
 **WhatCable-GNOME is a GNOME port of [WhatCable](https://github.com/darrylmorley/whatcable), a macOS menu bar app by [Darryl Morley](https://github.com/darrylmorley).** It expands the original USB-C focus to cover all USB devices, while preserving the rich USB-C Power Delivery diagnostics from the original.
 
 The extension is a thin shell over the [`whatcable-linux`](https://github.com/Zetaphor/whatcable-linux) CLI, which does the actual sysfs reading and PD decoding.
 
+
 ![WhatCable-GNOME](screenshot.png)
 
-## What it shows
+## Quickstart
 
-### All USB devices
-- **Device identity**: vendor, product name, serial number
-- **Speed**: negotiated link speed (1.5 Mbps to 20 Gbps)
-- **USB version**: 1.1, 2.0, 3.0, 3.1, 3.2
-- **Power draw**: how much power the device is consuming
-- **Device type**: HID, Audio, Mass Storage, Hub, etc.
-- **Driver**: which kernel driver is handling the device
-- **Topology**: hub hierarchy showing what's plugged into what
+1. Install the `whatcable-linux` CLI from <https://github.com/Zetaphor/whatcable-linux> — the extension shells out to it.
+2. Install the extension from <https://extensions.gnome.org/extension/9837/whatcable/>.
+3. Click the panel icon to see what each connected USB device can do.
 
-### USB-C ports (additional detail)
-- **Port roles**: data role (host/device), power role (source/sink)
-- **Cable e-marker info**: cable speed capability, current rating (3A/5A), active vs passive, cable vendor
-- **Charger PDO list**: every voltage/current profile the charger advertises, with the active profile highlighted
-- **Charging diagnostics**: identifies bottlenecks — cable limiting speed, charger undersized, etc.
-- **Partner identity**: decoded from PD Discover Identity VDOs
+For manual install (build from source, system-wide, nested-shell testing) see [Install from source](#install-from-source) below.
 
-## Install
+The extension looks for `whatcable-linux` on `$PATH`, `/usr/local/bin`, or `/usr/bin`, and was last verified against `whatcable-linux 0.1.1` — the *Debug info* submenu shows installed vs known-good version so you can spot a mismatch.
 
-### 1. Install the `whatcable-linux` CLI
+## Install from source
 
-The extension shells out to the `whatcable-linux` binary on your `$PATH` (or `/usr/local/bin` / `/usr/bin`). Follow the install instructions at <https://github.com/Zetaphor/whatcable-linux>. Upstream is young — its build steps may simplify or move to package managers over time, so check there for the latest.
-
-The extension was last verified against `whatcable-linux 0.1.1`. The currently-installed version is shown in the extension's *Debug info* submenu next to the known-good version, so you can spot a mismatch.
-
-### 2. Install the GNOME Shell extension
-
-It targets GNOME Shell 45+.
+Targets GNOME Shell 45–48.
 
 ```bash
 cd gnome-extension
@@ -74,9 +60,9 @@ MUTTER_DEBUG_DUMMY_MODE_SPECS=1600x1000 dbus-run-session -- gnome-shell --nested
 
 ## How it works
 
-WhatCable-GNOME is a pure-GJS panel indicator. It periodically invokes `whatcable-linux --json` via `Gio.Subprocess` and renders the parsed JSON into a popup menu. Each entry in the JSON output becomes a sub-menu with the device's headline, bullets, charging diagnostics, and (for chargers) the full PDO list. Output is permissively validated — malformed entries become a warning row instead of breaking the menu.
+WhatCable-GNOME is a pure-GJS panel indicator. It invokes `whatcable-linux --json` via `Gio.Subprocess` and renders each entry as a sub-menu with the device's headline, bullets, charging diagnostics, and (for chargers) the PDO list. Malformed entries degrade to a warning row.
 
-All the actual work — reading `/sys/bus/usb/devices/`, `/sys/class/typec/`, `/sys/class/usb_power_delivery/`, decoding USB PD VDOs, identifying charging bottlenecks — lives in the upstream CLI. Keeping the extension thin makes it small and easy to audit (which matters for the GNOME Extensions review process).
+All the real work — reading `/sys/bus/usb/devices/`, `/sys/class/typec/`, `/sys/class/usb_power_delivery/`, decoding PD VDOs, identifying charging bottlenecks — lives in the upstream CLI.
 
 ## Caveats
 
@@ -89,21 +75,17 @@ All the actual work — reading `/sys/bus/usb/devices/`, `/sys/class/typec/`, `/
 
 ### todo
 
-* add shexli to makefile
-* add shexli to release-job 
-* validate readme
-* testing with many devices/cable
+* testing with many devices/cables
 * testing with newer gnome versions
-* compare with upstream and implement feature/ui/etc. 
+* compare with upstream and implement feature/ui/etc.
 
 ### release process
 
-1. push to main
-2. create release tag
-3. wait for gha release build
-4. download zip file
-5. `uvx shexli whatcable-gnome-extension-v0.1.0.zip`
-6. https://extensions.gnome.org/upload/
+1. `make pack` — check for shexli warnings
+2. push to main, then create release tag
+3. wait for GHA release build, re-check shexli log
+4. download zip from the release
+5. upload at <https://extensions.gnome.org/upload/>
 
 ## Credits
 
