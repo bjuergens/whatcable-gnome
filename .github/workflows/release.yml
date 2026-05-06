@@ -33,6 +33,7 @@ jobs:
           ZIP="../whatcable-gnome-extension-${GITHUB_REF_NAME}.zip"
           zip -r "${ZIP}" \
             metadata.json extension.js prefs.js stylesheet.css buildinfo.json \
+            lib/ \
             schemas/org.gnome.shell.extensions.whatcable.gschema.xml \
             schemas/gschemas.compiled
           # Sanity check: the zip must have files at the root, not nested under
@@ -53,13 +54,6 @@ jobs:
             | File | Description |
             |------|-------------|
             | `whatcable-gnome-extension-${{ github.ref_name }}.zip` | GNOME Shell extension. Install with `gnome-extensions install --force <file>`. |
-
-            ### Requirements
-
-            The extension shells out to the `whatcable-linux` CLI. Install it from
-            [Zetaphor/whatcable-linux](https://github.com/Zetaphor/whatcable-linux)
-            and make sure the binary is on your `$PATH` (or in `/usr/local/bin` / `/usr/bin`)
-            before enabling the extension.
 
             ### Quick install
 

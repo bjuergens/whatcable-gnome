@@ -1,11 +1,11 @@
 // WhatCable GNOME Shell extension
-// Top-bar indicator that shows a popup of every USB device on the system,
-// using the `whatcable-linux --json` CLI.
+// Top-bar indicator that shows a popup of every USB device on the system.
+// Reads /sys/bus/usb/devices, /sys/class/typec, and /sys/class/usb_power_delivery
+// directly via async Gio APIs (see lib/).
 
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Gio from 'gi://Gio';
-import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -13,18 +13,9 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
-const CLI_CANDIDATES = [
-    'whatcable-linux',
-    '/usr/local/bin/whatcable-linux',
-    '/usr/bin/whatcable-linux',
-];
+import {collectDevices} from './lib/device-manager.js';
 
-// Bumped manually when a new upstream `whatcable-linux` release has been
-// verified to work with this extension. Shown in the debug submenu so users
-// can compare against the version they actually have installed.
-const KNOWN_GOOD_CLI_VERSION = '0.1.1';
-
-// Permissive shape check for one device entry from the CLI's --json output.
+// Permissive shape check for one device entry produced by collectDevices().
 // Returns {ok: true, device} where `device` is a sanitized copy holding only
 // well-typed fields (so a wrong-typed optional field degrades to "missing"
 // rather than throwing in `_buildDeviceItem`), or {ok: false, summary} if the
@@ -78,50 +69,6 @@ function validateDevice(d) {
     return {ok: true, device: out};
 }
 
-function findCliPath() {
-    for (const candidate of CLI_CANDIDATES) {
-        if (candidate.startsWith('/')) {
-            if (GLib.file_test(candidate, GLib.FileTest.IS_EXECUTABLE))
-                return candidate;
-        } else {
-            const resolved = GLib.find_program_in_path(candidate);
-            if (resolved)
-                return resolved;
-        }
-    }
-    return null;
-}
-
-function runCliAsync(cliPath, args, cancellable, callback) {
-    let proc;
-    try {
-        proc = new Gio.Subprocess({
-            argv: [cliPath, ...args],
-            flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
-        });
-        proc.init(cancellable);
-    } catch (e) {
-        callback(null, `Failed to launch ${cliPath}: ${e.message}`);
-        return null;
-    }
-
-    proc.communicate_utf8_async(null, cancellable, (p, res) => {
-        try {
-            const [, stdout, stderr] = p.communicate_utf8_finish(res);
-            if (!p.get_successful()) {
-                callback(null, stderr?.trim() || 'CLI exited with non-zero status');
-                return;
-            }
-            callback(stdout, null);
-        } catch (e) {
-            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
-                return;
-            callback(null, e.message);
-        }
-    });
-    return proc;
-}
-
 function readBuildTimeAsync(extensionPath, cancellable, callback) {
     const file = Gio.File.new_for_path(`${extensionPath}/buildinfo.json`);
     file.load_contents_async(cancellable, (f, res) => {
@@ -145,9 +92,7 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._disposed = false;
         this._inFlight = false;
         this._cancellable = new Gio.Cancellable();
-        this._cliPath = findCliPath();
         this._buildTime = null;
-        this._cliVersion = null;
         this._lastRefreshTime = null;
         this._settings = settings;
         this._settingsChangedIds = [
@@ -179,7 +124,6 @@ class WhatCableIndicator extends PanelMenu.Button {
             this._buildTime = buildTime;
             this._updateDebugItems();
         });
-        this._fetchCliVersion();
         this._refresh();
 
         this._menuOpenStateId = this.menu.connect('open-state-changed', (_menu, open) => {
@@ -210,10 +154,6 @@ class WhatCableIndicator extends PanelMenu.Button {
 
         this._debugMenu = new PopupMenu.PopupSubMenuMenuItem('Debug info');
         this._buildTimeItem = new PopupMenu.PopupMenuItem('', {reactive: false});
-        this._cliVersionItem = new PopupMenu.PopupMenuItem('', {reactive: false});
-        this._knownGoodItem = new PopupMenu.PopupMenuItem(
-            `Known good whatcable-linux: ${KNOWN_GOOD_CLI_VERSION}`,
-            {reactive: false});
         this._lastRefreshItem = new PopupMenu.PopupMenuItem('', {reactive: false});
         this._showEmptyPortsItem = this._makeStickySwitch(
             'Show empty ports', this._settings.get_boolean('show-empty-ports'),
@@ -234,8 +174,6 @@ class WhatCableIndicator extends PanelMenu.Button {
             }),
         );
         this._debugMenu.menu.addMenuItem(this._buildTimeItem);
-        this._debugMenu.menu.addMenuItem(this._cliVersionItem);
-        this._debugMenu.menu.addMenuItem(this._knownGoodItem);
         this._debugMenu.menu.addMenuItem(this._lastRefreshItem);
         this._debugMenu.menu.addMenuItem(this._showEmptyPortsItem);
         this._debugMenu.menu.addMenuItem(this._showInternalDevicesItem);
@@ -246,60 +184,26 @@ class WhatCableIndicator extends PanelMenu.Button {
     _updateDebugItems() {
         this._buildTimeItem.label.text =
             `Extension build: ${this._buildTime ?? 'unknown'}`;
-        this._cliVersionItem.label.text =
-            `Installed whatcable-linux: ${this._cliVersion ?? 'unknown'}`;
         this._lastRefreshItem.label.text =
             `Last refresh: ${this._lastRefreshTime ?? 'never'}`;
-    }
-
-    _fetchCliVersion() {
-        if (!this._cliPath) {
-            this._cliVersion = 'CLI not found';
-            this._updateDebugItems();
-            return;
-        }
-        runCliAsync(this._cliPath, ['--version'], this._cancellable, (stdout, error) => {
-            if (this._disposed)
-                return;
-            this._cliVersion = error ? `error: ${error}` : (stdout?.trim() || 'unknown');
-            this._updateDebugItems();
-        });
     }
 
     _refresh() {
         if (this._disposed || this._inFlight)
             return;
-        if (!this._cliPath) {
-            this._showError(
-                'whatcable-linux CLI not found.\n' +
-                'Install it to /usr/local/bin or your PATH.',
-            );
-            return;
-        }
         this._inFlight = true;
-        runCliAsync(this._cliPath, ['--json'], this._cancellable, (stdout, error) => {
+        collectDevices().then(devices => {
             this._inFlight = false;
             if (this._disposed)
                 return;
-            if (error) {
-                this._showError(error);
-                return;
-            }
-            let parsed;
-            try {
-                parsed = JSON.parse(stdout);
-            } catch (e) {
-                this._showError(`Failed to parse CLI output: ${e.message}`);
-                return;
-            }
-            if (!Array.isArray(parsed)) {
-                this._showError('CLI returned unexpected payload (not a JSON array). ' +
-                    `Try a known-good whatcable-linux ≥ ${KNOWN_GOOD_CLI_VERSION}.`);
-                return;
-            }
             this._lastRefreshTime = new Date().toLocaleTimeString();
             this._updateDebugItems();
-            this._showDevices(parsed);
+            this._showDevices(devices);
+        }).catch(e => {
+            this._inFlight = false;
+            if (this._disposed)
+                return;
+            this._showError(`Failed to read /sys: ${e.message}`);
         });
     }
 

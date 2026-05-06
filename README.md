@@ -6,7 +6,7 @@ A GNOME Shell extension that tells you, in plain English, what each USB device p
 
 **WhatCable-GNOME is a GNOME port of [WhatCable](https://github.com/darrylmorley/whatcable), a macOS menu bar app by [Darryl Morley](https://github.com/darrylmorley).** It expands the original USB-C focus to cover all USB devices, while preserving the rich USB-C Power Delivery diagnostics from the original.
 
-The extension is a thin shell over the [`whatcable-linux`](https://github.com/Zetaphor/whatcable-linux) CLI, which does the actual sysfs reading and PD decoding.
+The extension reads `/sys/bus/usb/devices/`, `/sys/class/typec/`, and `/sys/class/usb_power_delivery/` directly via async `Gio` APIs — no external CLI or native binary required.
 
 ![WhatCable-GNOME](screenshot.png)
 
@@ -30,15 +30,7 @@ The extension is a thin shell over the [`whatcable-linux`](https://github.com/Ze
 
 ## Install
 
-### 1. Install the `whatcable-linux` CLI
-
-The extension shells out to the `whatcable-linux` binary on your `$PATH` (or `/usr/local/bin` / `/usr/bin`). Follow the install instructions at <https://github.com/Zetaphor/whatcable-linux>. Upstream is young — its build steps may simplify or move to package managers over time, so check there for the latest.
-
-The extension was last verified against `whatcable-linux 0.1.1`. The currently-installed version is shown in the extension's *Debug info* submenu next to the known-good version, so you can spot a mismatch.
-
-### 2. Install the GNOME Shell extension
-
-It targets GNOME Shell 45+.
+The extension is self-contained — no separate CLI or native binary required. It targets GNOME Shell 45+.
 
 ```bash
 cd gnome-extension
@@ -74,9 +66,9 @@ MUTTER_DEBUG_DUMMY_MODE_SPECS=1600x1000 dbus-run-session -- gnome-shell --nested
 
 ## How it works
 
-WhatCable-GNOME is a pure-GJS panel indicator. It periodically invokes `whatcable-linux --json` via `Gio.Subprocess` and renders the parsed JSON into a popup menu. Each entry in the JSON output becomes a sub-menu with the device's headline, bullets, charging diagnostics, and (for chargers) the full PDO list. Output is permissively validated — malformed entries become a warning row instead of breaking the menu.
+WhatCable-GNOME is a pure-GJS panel indicator. On open (and on Refresh) it walks `/sys/bus/usb/devices/`, `/sys/class/typec/`, and `/sys/class/usb_power_delivery/` via async `Gio.File` APIs, decodes USB PD identity/cable VDOs, runs a charging-bottleneck diagnostic, and renders the result into a popup menu. Each device becomes a sub-menu with its headline, bullets, charging diagnostic, and (for chargers) the full PDO list. Entries are permissively validated — a malformed one becomes a warning row instead of breaking the menu.
 
-All the actual work — reading `/sys/bus/usb/devices/`, `/sys/class/typec/`, `/sys/class/usb_power_delivery/`, decoding USB PD VDOs, identifying charging bottlenecks — lives in the upstream CLI. Keeping the extension thin makes it small and easy to audit (which matters for the GNOME Extensions review process).
+The reading/parsing logic lives in `gnome-extension/lib/` (one module per concern: `sysfs`, `usb-device`, `typec-port`, `power-delivery`, `pd-decoder`, `cable-info`, `charging-diagnostic`, `device-summary`, `device-manager`). All file IO is async so the shell's main loop is never blocked.
 
 ## Caveats
 
@@ -90,11 +82,12 @@ All the actual work — reading `/sys/bus/usb/devices/`, `/sys/class/typec/`, `/
 ### todo
 
 * add shexli to makefile
-* add shexli to release-job 
+* add shexli to release-job
 * validate readme
 * testing with many devices/cable
 * testing with newer gnome versions
-* compare with upstream and implement feature/ui/etc. 
+* compare with upstream and implement feature/ui/etc.
+* expand vendor DB beyond the ~55 hardcoded entries
 
 ### release process
 
@@ -107,7 +100,7 @@ All the actual work — reading `/sys/bus/usb/devices/`, `/sys/class/typec/`, `/
 
 ## Credits
 
-WhatCable-GNOME is a port of [WhatCable](https://github.com/darrylmorley/whatcable) by [Darryl Morley](https://github.com/darrylmorley). The USB Power Delivery decoding logic, charging diagnostics, vendor database, and plain-English summary approach are derived from the original macOS app, via the [`whatcable-linux`](https://github.com/Zetaphor/whatcable-linux) CLI port.
+WhatCable-GNOME is a port of [WhatCable](https://github.com/darrylmorley/whatcable) by [Darryl Morley](https://github.com/darrylmorley). The USB Power Delivery decoding logic, charging diagnostics, vendor database, and plain-English summary approach are derived from the original macOS app, via the intermediate [`whatcable-linux`](https://github.com/Zetaphor/whatcable-linux) C++/Qt port — those C++ sources have been re-implemented in GJS in `gnome-extension/lib/`.
 
 ## License
 
