@@ -1,60 +1,59 @@
-// Enumerate /sys/bus/usb/devices/. Direct port of src/core/UsbDevice.cpp.
+// Enumerate /sys/bus/usb/devices/.
 
 import * as Sysfs from './sysfs.js';
+import {formatVidPid} from './vendor-db.js';
 
 const USB_DEVICES_PATH = '/sys/bus/usb/devices';
 
+const SPEED_LABELS = [
+    [20000, 'USB4 20 Gbps'],
+    [10000, 'SuperSpeed+ 10 Gbps'],
+    [5000,  'SuperSpeed 5 Gbps'],
+    [480,   'High Speed 480 Mbps'],
+    [12,    'Full Speed 12 Mbps'],
+    [2,     'Low Speed 1.5 Mbps'],
+];
+
 function speedLabel(speedMbps) {
-    if (speedMbps >= 20000) return 'USB4 20 Gbps';
-    if (speedMbps >= 10000) return 'SuperSpeed+ 10 Gbps';
-    if (speedMbps >= 5000)  return 'SuperSpeed 5 Gbps';
-    if (speedMbps >= 480)   return 'High Speed 480 Mbps';
-    if (speedMbps >= 12)    return 'Full Speed 12 Mbps';
-    if (speedMbps >= 2)     return 'Low Speed 1.5 Mbps';
+    for (const [threshold, label] of SPEED_LABELS) {
+        if (speedMbps >= threshold) return label;
+    }
     return 'Unknown speed';
 }
 
 function powerLabel(maxPowerMA) {
     if (maxPowerMA <= 0) return '';
-    if (maxPowerMA >= 1000)
-        return `${(maxPowerMA / 1000).toFixed(1)} W`;
+    if (maxPowerMA >= 1000) return `${(maxPowerMA / 1000).toFixed(1)} W`;
     return `${maxPowerMA} mA`;
 }
 
 function parseMaxPower(val) {
     if (!val) return 0;
     const numeric = val.replace(/[^0-9]/g, '');
-    if (!numeric) return 0;
-    const n = parseInt(numeric, 10);
-    return Number.isFinite(n) ? n : 0;
-}
-
-async function readByte(path) {
-    const v = await Sysfs.readHexAttribute(path);
-    return v === null ? 0 : v & 0xFF;
+    return numeric ? parseInt(numeric, 10) || 0 : 0;
 }
 
 async function readInterfaces(devPath) {
     const entries = await Sysfs.listSubdirectories(devPath);
-    const ifaces = [];
-    for (const entry of entries) {
-        if (!entry.includes(':')) continue;
+    const ifaceEntries = entries.filter(e => e.includes(':'));
+
+    return Promise.all(ifaceEntries.map(async entry => {
         const ifPath = `${devPath}/${entry}`;
-        const cls = await Sysfs.readHexAttribute(`${ifPath}/bInterfaceClass`);
-        if (cls === null) continue;
-        const sub = await Sysfs.readHexAttribute(`${ifPath}/bInterfaceSubClass`);
-        const proto = await Sysfs.readHexAttribute(`${ifPath}/bInterfaceProtocol`);
+        const [cls, sub, proto] = await Promise.all([
+            Sysfs.readHexAttribute(`${ifPath}/bInterfaceClass`),
+            Sysfs.readHexAttribute(`${ifPath}/bInterfaceSubClass`),
+            Sysfs.readHexAttribute(`${ifPath}/bInterfaceProtocol`),
+        ]);
+        if (cls === null) return null;
         const driver = Sysfs.readSymlinkTargetBasename(`${ifPath}/driver`);
-        const numStr = entry.split('.').pop();
-        ifaces.push({
-            number: parseInt(numStr, 10) || 0,
+        return {
+            number: parseInt(entry.split('.').pop(), 10) || 0,
             classCode: cls & 0xFF,
-            subClass: sub === null ? 0 : sub & 0xFF,
-            protocol: proto === null ? 0 : proto & 0xFF,
+            subClass: (sub ?? 0) & 0xFF,
+            protocol: (proto ?? 0) & 0xFF,
             driver: driver ?? '',
-        });
-    }
-    return ifaces;
+        };
+    })).then(list => list.filter(i => i !== null));
 }
 
 async function readDevice(path, name) {
@@ -83,13 +82,14 @@ async function readDevice(path, name) {
         Sysfs.readIntAttribute(`${path}/rx_lanes`),
         Sysfs.readIntAttribute(`${path}/tx_lanes`),
         Sysfs.readIntAttribute(`${path}/bNumConfigurations`),
-        readByte(`${path}/bDeviceClass`),
-        readByte(`${path}/bDeviceSubClass`),
-        readByte(`${path}/bDeviceProtocol`),
-        Sysfs.readAttribute(`${path}/bNumInterfaces`),
+        Sysfs.readHexAttribute(`${path}/bDeviceClass`),
+        Sysfs.readHexAttribute(`${path}/bDeviceSubClass`),
+        Sysfs.readHexAttribute(`${path}/bDeviceProtocol`),
+        Sysfs.readIntAttribute(`${path}/bNumInterfaces`),
         readInterfaces(path),
     ]);
 
+    const cls = (deviceClass ?? 0) & 0xFF;
     return {
         sysfsPath: path,
         busPort: name,
@@ -98,7 +98,7 @@ async function readDevice(path, name) {
         manufacturer: manufacturer ?? '',
         product: product ?? '',
         serial: serial ?? '',
-        version: (version ?? '').trim(),
+        version: version?.trim() ?? '',
         removable: removable ?? '',
         speed: speed ?? 0,
         maxPowerMA: parseMaxPower(maxPowerRaw),
@@ -106,20 +106,19 @@ async function readDevice(path, name) {
         devNum: devNum ?? 0,
         rxLanes: rxLanes ?? 0,
         txLanes: txLanes ?? 0,
-        numInterfaces: numInterfacesStr ? parseInt(numInterfacesStr.trim(), 10) || 0 : 0,
+        numInterfaces: numInterfacesStr ?? 0,
         numConfigurations: numConfigs ?? 0,
-        deviceClass,
-        deviceSubClass,
-        deviceProtocol,
-        isHub: deviceClass === 0x09,
+        deviceClass: cls,
+        deviceSubClass: (deviceSubClass ?? 0) & 0xFF,
+        deviceProtocol: (deviceProtocol ?? 0) & 0xFF,
+        isHub: cls === 0x09,
         isRootHub: name.startsWith('usb'),
         interfaces,
     };
 }
 
 export function displayName(dev) {
-    if (dev.product) return dev.product;
-    return `${dev.vendorId.toString(16).padStart(4, '0')}:${dev.productId.toString(16).padStart(4, '0')}`;
+    return dev.product || formatVidPid(dev.vendorId, dev.productId);
 }
 
 export function deviceSpeedLabel(dev) {
@@ -134,7 +133,6 @@ export async function enumerateUsbDevices() {
     if (!Sysfs.pathExists(USB_DEVICES_PATH)) return [];
     const entries = await Sysfs.listSubdirectories(USB_DEVICES_PATH);
     const devices = await Promise.all(
-        entries.map(name => readDevice(`${USB_DEVICES_PATH}/${name}`, name)),
-    );
+        entries.map(name => readDevice(`${USB_DEVICES_PATH}/${name}`, name)));
     return devices.filter(d => d !== null);
 }
