@@ -21,8 +21,8 @@ One component:
 - All file IO must be **async** (`Gio.File.load_contents_async`, `enumerate_children_async`, etc., promisified via `Gio._promisify`). Never block the shell's main loop with sync sysfs reads in a refresh path.
 - Disconnect every settings/signal connection in `destroy()` / `disable()`.
 - Don't add npm/JS dependencies — extensions.gnome.org ships source-only and rejects bundlers.
-- we generally want to fail first, i.e. throw exceptions in unexpected cases. 
-- In the UI treat missing sysfs paths as "feature absent", not as errors. Type-C and PD trees are kernel-feature-gated. Thus we throw a custom exception in these cases and catch them at a suitable place.
+- We generally want to fail first — throw on unexpected conditions instead of papering over them.
+- Missing sysfs paths are *expected*, not unexpected. `/sys/class/typec` and `/sys/class/usb_power_delivery` are kernel-feature-gated and may not exist. The `Sysfs` helpers translate `G_IO_ERROR_NOT_FOUND` to `null` / `[]` so callers can treat absence as "feature absent". Any other IO error (permission denied, EIO, …) propagates up to `_refresh`, which surfaces it as a status message — don't blanket-swallow exceptions.
 
 ## Principles
 
@@ -38,7 +38,7 @@ Use consistently in code, commits, and logging.
 
 ### Commits
 
-Human-made commit usually contain no commits, while agent-made commits do.
+Human-made commits usually contain no emoji, while agent-made commits do.
 
 `<emoji> <type>: <description>`
 

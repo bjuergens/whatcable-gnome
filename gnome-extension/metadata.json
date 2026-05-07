@@ -1,7 +1,7 @@
 {
     "uuid": "whatcable@bjuergens.github.io",
     "name": "WhatCable",
-    "description": "Shows what each USB cable and device can do. Lists every USB device with speed, power, and USB-C cable / Power Delivery details. Requires the whatcable-linux CLI from https://github.com/Zetaphor/whatcable-linux to be installed on PATH. Port of WhatCable (macOS) by Darryl Morley.",
+    "description": "Shows what each USB cable and device can do. Lists every USB device with speed, power, and USB-C cable / Power Delivery details, read directly from sysfs. Port of WhatCable (macOS) by Darryl Morley.",
     "shell-version": ["45", "46", "47", "48"],
     "url": "https://github.com/bjuergens/whatcable-gnome",
     "settings-schema": "org.gnome.shell.extensions.whatcable",

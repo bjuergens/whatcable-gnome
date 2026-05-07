@@ -1,9 +1,10 @@
-// Enumerate /sys/class/typec/. Direct port of src/core/TypeCPort.cpp.
+// Enumerate /sys/class/typec/.
 
 import * as Sysfs from './sysfs.js';
 
 const TYPEC_PATH = '/sys/class/typec';
 const BRACKET_RE = /\[([^\]]+)\]/;
+const PORT_NUM_RE = /^port(\d+)$/;
 
 const VDO_FILES = new Set([
     'id_header',
@@ -16,8 +17,7 @@ const VDO_FILES = new Set([
 
 function extractCurrentRole(value) {
     if (!value) return '';
-    const m = BRACKET_RE.exec(value);
-    return m ? m[1] : value;
+    return BRACKET_RE.exec(value)?.[1] ?? value;
 }
 
 async function readIdentity(path) {
@@ -25,34 +25,31 @@ async function readIdentity(path) {
     if (!Sysfs.pathExists(idPath)) return null;
 
     const files = await Sysfs.listFiles(idPath);
-    const relevant = files.filter(f => f.startsWith('vdo') || VDO_FILES.has(f));
-
-    const reads = await Promise.all(
-        relevant.map(f => Sysfs.readHexAttribute(`${idPath}/${f}`)),
-    );
-
     // Keyed by filename, not position. The kernel exposes id_header, cert_stat,
     // product, product_type_vdo1..3 as named files; alphabetical iteration would
     // put cert_stat (= PD VDO2) at index 0 and decoders that expect VDO1 at
     // index 0 would silently decode the wrong word.
-    const id = {vendorId: 0, productId: 0, vdos: {}};
-    relevant.forEach((name, i) => {
-        const val = reads[i];
-        if (val === null) return;
-        if (name === 'id_header') id.vendorId = val & 0xFFFF;
-        else if (name === 'product') id.productId = val & 0xFFFF;
-        id.vdos[name] = val;
-    });
+    const relevant = files.filter(f => f.startsWith('vdo') || VDO_FILES.has(f));
+    const reads = await Promise.all(
+        relevant.map(f => Sysfs.readHexAttribute(`${idPath}/${f}`)));
 
-    if (id.vendorId === 0 && Object.keys(id.vdos).length === 0) return null;
-    return id;
+    const vdos = Object.fromEntries(
+        relevant.map((name, i) => [name, reads[i]])
+            .filter(([, val]) => val !== null));
+
+    if (vdos.id_header === undefined && Object.keys(vdos).length === 0)
+        return null;
+
+    return {
+        vendorId: (vdos.id_header ?? 0) & 0xFFFF,
+        productId: (vdos.product ?? 0) & 0xFFFF,
+        vdos,
+    };
 }
 
 async function readPort(path, name) {
-    if (!name.startsWith('port')) return null;
-
-    const numMatch = /^port(\d+)$/.exec(name);
-    const portNumber = numMatch ? parseInt(numMatch[1], 10) : -1;
+    const numMatch = PORT_NUM_RE.exec(name);
+    if (!numMatch) return null;
 
     const [
         dataRole, powerRole, portType, powerOpMode, orientation,
@@ -67,37 +64,37 @@ async function readPort(path, name) {
         Sysfs.readAttribute(`${path}/usb_typec_revision`),
     ]);
 
-    let partner = null;
     const partnerPath = `${path}-partner`;
-    if (Sysfs.pathExists(partnerPath)) {
-        const [type, identity] = await Promise.all([
+    const partner = Sysfs.pathExists(partnerPath)
+        ? await Promise.all([
             Sysfs.readAttribute(`${partnerPath}/type`),
             readIdentity(partnerPath),
-        ]);
-        partner = {type: type ?? '', identity};
-    }
+        ]).then(([type, identity]) => ({type: type ?? '', identity}))
+        : null;
 
-    let cable = null;
     const cablePath = `${path}-cable`;
-    if (Sysfs.pathExists(cablePath)) {
-        const [type, plugType, identity] = await Promise.all([
+    const cable = Sysfs.pathExists(cablePath)
+        ? await Promise.all([
             Sysfs.readAttribute(`${cablePath}/type`),
             Sysfs.readAttribute(`${cablePath}/plug_type`),
             readIdentity(cablePath),
-        ]);
-        cable = {type: type ?? '', plugType: plugType ?? '', identity};
-    }
+        ]).then(([type, plugType, identity]) => ({
+            type: type ?? '',
+            plugType: plugType ?? '',
+            identity,
+        }))
+        : null;
 
     // Kernel exposes the typec→PD association as a `usb_power_delivery`
     // symlink (e.g. `/sys/class/typec/port0/usb_power_delivery -> ../../usb_power_delivery/source0`).
-    // We pick up the basename to pair with the PD port enumeration without
+    // Pick up the basename to pair with the PD port enumeration without
     // guessing port indices.
     const pdPortName = Sysfs.readSymlinkTargetBasename(`${path}/usb_power_delivery`);
 
     return {
         sysfsPath: path,
         portName: name,
-        portNumber,
+        portNumber: parseInt(numMatch[1], 10),
         dataRole: dataRole ?? '',
         powerRole: powerRole ?? '',
         portType: portType ?? '',
@@ -105,7 +102,7 @@ async function readPort(path, name) {
         orientation: orientation ?? '',
         pdRevision: pdRevision ?? '',
         usbTypeCRev: usbTypeCRev ?? '',
-        pdPortName: pdPortName ?? null,
+        pdPortName,
         partner,
         cable,
         hasPartner: partner !== null,
@@ -129,7 +126,6 @@ export async function enumerateTypecPorts() {
     if (!Sysfs.pathExists(TYPEC_PATH)) return [];
     const entries = await Sysfs.listSubdirectories(TYPEC_PATH);
     const ports = await Promise.all(
-        entries.map(name => readPort(`${TYPEC_PATH}/${name}`, name)),
-    );
+        entries.map(name => readPort(`${TYPEC_PATH}/${name}`, name)));
     return ports.filter(p => p !== null);
 }

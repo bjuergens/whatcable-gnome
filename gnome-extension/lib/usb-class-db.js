@@ -1,67 +1,42 @@
-// USB class-code → human-readable name. Direct port of src/core/UsbClassDB.cpp.
+// USB class-code → human-readable name.
+
+const CLASS_NAMES = {
+    0x00: 'Composite',
+    0x01: 'Audio',
+    0x02: 'Communications',
+    0x03: 'HID',
+    0x05: 'Physical',
+    0x06: 'Image',
+    0x07: 'Printer',
+    0x08: 'Mass Storage',
+    0x09: 'Hub',
+    0x0A: 'CDC Data',
+    0x0B: 'Smart Card',
+    0x0D: 'Content Security',
+    0x0E: 'Video',
+    0x0F: 'Personal Healthcare',
+    0x10: 'Audio/Video',
+    0x11: 'Billboard',
+    0x12: 'USB Type-C Bridge',
+    0xDC: 'Diagnostic',
+    0xE0: 'Wireless',
+    0xEF: 'Miscellaneous',
+    0xFE: 'Application Specific',
+    0xFF: 'Vendor Specific',
+};
+
+const SUBCLASS_NAMES = {
+    0x01: {0x01: 'Audio Control', 0x02: 'Audio Streaming', 0x03: 'MIDI Streaming'},
+    0x03: {0x00: 'HID (No Subclass)', 0x01: 'HID Boot Interface'},
+    0x08: {0x01: 'RBC', 0x02: 'MMC-5 (ATAPI)', 0x04: 'UFI', 0x06: 'SCSI', 0x08: 'UAS'},
+    0x0E: {0x01: 'Video Control', 0x02: 'Video Streaming'},
+    0xE0: {0x01: 'Bluetooth', 0x02: 'Wireless USB'},
+};
 
 export function className(classCode) {
-    switch (classCode) {
-    case 0x00: return 'Composite';
-    case 0x01: return 'Audio';
-    case 0x02: return 'Communications';
-    case 0x03: return 'HID';
-    case 0x05: return 'Physical';
-    case 0x06: return 'Image';
-    case 0x07: return 'Printer';
-    case 0x08: return 'Mass Storage';
-    case 0x09: return 'Hub';
-    case 0x0A: return 'CDC Data';
-    case 0x0B: return 'Smart Card';
-    case 0x0D: return 'Content Security';
-    case 0x0E: return 'Video';
-    case 0x0F: return 'Personal Healthcare';
-    case 0x10: return 'Audio/Video';
-    case 0x11: return 'Billboard';
-    case 0x12: return 'USB Type-C Bridge';
-    case 0xDC: return 'Diagnostic';
-    case 0xE0: return 'Wireless';
-    case 0xEF: return 'Miscellaneous';
-    case 0xFE: return 'Application Specific';
-    case 0xFF: return 'Vendor Specific';
-    default:   return `0x${classCode.toString(16).padStart(2, '0')}`;
-    }
+    return CLASS_NAMES[classCode] ?? `0x${classCode.toString(16).padStart(2, '0')}`;
 }
 
 export function interfaceClassName(classCode, subClass) {
-    if (classCode === 0x01) {
-        switch (subClass) {
-        case 0x01: return 'Audio Control';
-        case 0x02: return 'Audio Streaming';
-        case 0x03: return 'MIDI Streaming';
-        }
-    }
-    if (classCode === 0x03) {
-        switch (subClass) {
-        case 0x00: return 'HID (No Subclass)';
-        case 0x01: return 'HID Boot Interface';
-        }
-    }
-    if (classCode === 0x08) {
-        switch (subClass) {
-        case 0x01: return 'RBC';
-        case 0x02: return 'MMC-5 (ATAPI)';
-        case 0x04: return 'UFI';
-        case 0x06: return 'SCSI';
-        case 0x08: return 'UAS';
-        }
-    }
-    if (classCode === 0x0E) {
-        switch (subClass) {
-        case 0x01: return 'Video Control';
-        case 0x02: return 'Video Streaming';
-        }
-    }
-    if (classCode === 0xE0) {
-        switch (subClass) {
-        case 0x01: return 'Bluetooth';
-        case 0x02: return 'Wireless USB';
-        }
-    }
-    return className(classCode);
+    return SUBCLASS_NAMES[classCode]?.[subClass] ?? className(classCode);
 }

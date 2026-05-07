@@ -1,7 +1,6 @@
-// USB vendor ID → human-readable name. Direct port of src/core/VendorDB.cpp.
-// Falls back to the hex form ("0x1234") when the VID isn't in the table; callers
-// rely on the `0x` prefix to detect the fallback (DeviceSummary checks
-// startsWith('0x') to decide whether to render a vendor label).
+// USB vendor ID → human-readable name. `lookupVendor` returns null when the
+// VID isn't in the table; callers decide whether to render the hex form via
+// `formatHex16` (also used for productIds, which share the same 16-bit layout).
 
 const VENDORS = new Map([
     [0x05AC, 'Apple'],
@@ -63,7 +62,9 @@ const VENDORS = new Map([
 ]);
 
 export function lookupVendor(vendorId) {
-    const v = VENDORS.get(vendorId);
-    if (v) return v;
-    return `0x${vendorId.toString(16).padStart(4, '0')}`;
+    return VENDORS.get(vendorId) ?? null;
+}
+
+export function formatHex16(id) {
+    return `0x${id.toString(16).padStart(4, '0')}`;
 }

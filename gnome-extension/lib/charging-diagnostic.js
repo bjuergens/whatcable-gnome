@@ -1,4 +1,4 @@
-// Identify charging bottlenecks. Direct port of src/core/ChargingDiagnostic.cpp.
+// Identify charging bottlenecks (cable limit vs charger limit vs device).
 
 export const Bottleneck = Object.freeze({
     NoCharger: 'no-charger',

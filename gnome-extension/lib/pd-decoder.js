@@ -1,4 +1,4 @@
-// USB Power Delivery VDO bit-field decoding. Direct port of src/core/PDDecoder.cpp.
+// USB Power Delivery VDO bit-field decoding.
 // JS bitwise ops produce signed int32; use `>>> 0` and `>>>` to keep VDOs unsigned.
 
 export const ProductType = Object.freeze({
@@ -26,45 +26,83 @@ export const CableCurrent = Object.freeze({
     FiveAmp: 'five-amp',
 });
 
+const PRODUCT_TYPE_LABELS = {
+    [ProductType.Hub]: 'USB Hub',
+    [ProductType.Peripheral]: 'USB Peripheral',
+    [ProductType.PassiveCable]: 'Passive Cable',
+    [ProductType.ActiveCable]: 'Active Cable',
+    [ProductType.AMA]: 'Alternate Mode Adapter',
+    [ProductType.VPD]: 'VCONN-Powered Device',
+    [ProductType.Other]: 'Other',
+};
+
+const CABLE_SPEED_LABELS = {
+    [CableSpeed.USB20]: 'USB 2.0',
+    [CableSpeed.USB32Gen1]: 'USB 3.2 Gen 1 (5 Gbps)',
+    [CableSpeed.USB32Gen2]: 'USB 3.2 Gen 2 (10 Gbps)',
+    [CableSpeed.USB4Gen3]: 'USB4 Gen 3 (20/40 Gbps)',
+    [CableSpeed.USB4Gen4]: 'USB4 Gen 4 (40/80 Gbps)',
+};
+
+const CABLE_CURRENT_LABELS = {
+    [CableCurrent.USBDefault]: 'USB Default',
+    [CableCurrent.ThreeAmp]: '3A',
+    [CableCurrent.FiveAmp]: '5A',
+};
+
+const CABLE_CURRENT_AMPS = {
+    [CableCurrent.ThreeAmp]: 3.0,
+    [CableCurrent.FiveAmp]: 5.0,
+};
+
+// Bit-field 29:27 (UFP) and 25:23 (DFP) of the ID Header VDO.
+const UFP_PRODUCT_TYPES = [
+    ProductType.Undefined,
+    ProductType.Hub,
+    ProductType.Peripheral,
+    ProductType.PassiveCable,
+    ProductType.ActiveCable,
+    ProductType.AMA,
+    ProductType.VPD,
+    ProductType.Undefined,
+];
+
+const DFP_PRODUCT_TYPES = [
+    ProductType.Undefined,
+    ProductType.Hub,
+    ProductType.Peripheral,
+];
+
+// Bits 2:0 of the Cable VDO.
+const CABLE_SPEED_BITS = [
+    CableSpeed.USB20,
+    CableSpeed.USB32Gen1,
+    CableSpeed.USB32Gen2,
+    CableSpeed.USB4Gen3,
+    CableSpeed.USB4Gen4,
+];
+
+// Bits 6:5 of the Cable VDO.
+const CABLE_CURRENT_BITS = [
+    CableCurrent.USBDefault,
+    CableCurrent.ThreeAmp,
+    CableCurrent.FiveAmp,
+];
+
 export function productTypeLabel(type) {
-    switch (type) {
-    case ProductType.Hub:          return 'USB Hub';
-    case ProductType.Peripheral:   return 'USB Peripheral';
-    case ProductType.PassiveCable: return 'Passive Cable';
-    case ProductType.ActiveCable:  return 'Active Cable';
-    case ProductType.AMA:          return 'Alternate Mode Adapter';
-    case ProductType.VPD:          return 'VCONN-Powered Device';
-    case ProductType.Other:        return 'Other';
-    default:                       return 'Unknown';
-    }
+    return PRODUCT_TYPE_LABELS[type] ?? 'Unknown';
 }
 
 export function cableSpeedLabel(speed) {
-    switch (speed) {
-    case CableSpeed.USB20:     return 'USB 2.0';
-    case CableSpeed.USB32Gen1: return 'USB 3.2 Gen 1 (5 Gbps)';
-    case CableSpeed.USB32Gen2: return 'USB 3.2 Gen 2 (10 Gbps)';
-    case CableSpeed.USB4Gen3:  return 'USB4 Gen 3 (20/40 Gbps)';
-    case CableSpeed.USB4Gen4:  return 'USB4 Gen 4 (40/80 Gbps)';
-    default:                   return 'Unknown';
-    }
+    return CABLE_SPEED_LABELS[speed] ?? 'Unknown';
 }
 
 export function cableCurrentLabel(current) {
-    switch (current) {
-    case CableCurrent.USBDefault: return 'USB Default';
-    case CableCurrent.ThreeAmp:   return '3A';
-    case CableCurrent.FiveAmp:    return '5A';
-    default:                      return 'Unknown';
-    }
+    return CABLE_CURRENT_LABELS[current] ?? 'Unknown';
 }
 
 export function cableCurrentMaxAmps(current) {
-    switch (current) {
-    case CableCurrent.ThreeAmp: return 3.0;
-    case CableCurrent.FiveAmp:  return 5.0;
-    default:                    return 0.9;
-    }
+    return CABLE_CURRENT_AMPS[current] ?? 0.9;
 }
 
 // USB PD 3.x ID Header VDO (vdo[0]):
@@ -76,31 +114,12 @@ export function cableCurrentMaxAmps(current) {
 //   15-0:  Vendor ID
 export function decodeIDHeader(vdo) {
     const v = vdo >>> 0;
-    const ufpBits = (v >>> 27) & 0x7;
-    const dfpBits = (v >>> 23) & 0x7;
-
-    let ufpProductType = ProductType.Undefined;
-    switch (ufpBits) {
-    case 1: ufpProductType = ProductType.Hub; break;
-    case 2: ufpProductType = ProductType.Peripheral; break;
-    case 3: ufpProductType = ProductType.PassiveCable; break;
-    case 4: ufpProductType = ProductType.ActiveCable; break;
-    case 5: ufpProductType = ProductType.AMA; break;
-    case 6: ufpProductType = ProductType.VPD; break;
-    }
-
-    let dfpProductType = ProductType.Undefined;
-    switch (dfpBits) {
-    case 1: dfpProductType = ProductType.Hub; break;
-    case 2: dfpProductType = ProductType.Peripheral; break;
-    }
-
     return {
         usbCommCapableAsHost: ((v >>> 31) & 1) === 1,
         usbCommCapableAsDevice: ((v >>> 30) & 1) === 1,
+        ufpProductType: UFP_PRODUCT_TYPES[(v >>> 27) & 0x7],
         modalOperation: ((v >>> 26) & 1) === 1,
-        ufpProductType,
-        dfpProductType,
+        dfpProductType: DFP_PRODUCT_TYPES[(v >>> 23) & 0x7] ?? ProductType.Undefined,
         vendorId: v & 0xFFFF,
     };
 }
@@ -112,31 +131,9 @@ export function decodeIDHeader(vdo) {
 //   10-9:  Max VBUS voltage
 export function decodeCableVDO(vdo, isActive) {
     const v = vdo >>> 0;
-
-    let speed = CableSpeed.USB20;
-    switch (v & 0x7) {
-    case 0: speed = CableSpeed.USB20; break;
-    case 1: speed = CableSpeed.USB32Gen1; break;
-    case 2: speed = CableSpeed.USB32Gen2; break;
-    case 3: speed = CableSpeed.USB4Gen3; break;
-    case 4: speed = CableSpeed.USB4Gen4; break;
-    }
-
-    let currentRating = CableCurrent.USBDefault;
-    switch ((v >>> 5) & 0x3) {
-    case 0: currentRating = CableCurrent.USBDefault; break;
-    case 1: currentRating = CableCurrent.ThreeAmp; break;
-    case 2: currentRating = CableCurrent.FiveAmp; break;
-    }
-
-    let maxVbusVolts = 20;
-    switch ((v >>> 9) & 0x3) {
-    case 0: maxVbusVolts = 20; break;
-    case 1: maxVbusVolts = 30; break;
-    case 2: maxVbusVolts = 40; break;
-    case 3: maxVbusVolts = 50; break;
-    }
-
+    const speed = CABLE_SPEED_BITS[v & 0x7] ?? CableSpeed.USB20;
+    const currentRating = CABLE_CURRENT_BITS[(v >>> 5) & 0x3] ?? CableCurrent.USBDefault;
+    const maxVbusVolts = 20 + 10 * ((v >>> 9) & 0x3);
     const amps = cableCurrentMaxAmps(currentRating);
     return {
         speed,

@@ -1,6 +1,5 @@
 // Single entrypoint for the panel indicator: returns the device list as
 // JSON-shaped objects ready for validateDevice() / _buildDeviceItem().
-// Direct port of src/core/DeviceManager.cpp's refresh() logic.
 
 import {enumerateUsbDevices} from './usb-device.js';
 import {enumerateTypecPorts} from './typec-port.js';

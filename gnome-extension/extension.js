@@ -69,20 +69,16 @@ function validateDevice(d) {
     return {ok: true, device: out};
 }
 
-function readBuildTimeAsync(extensionPath, cancellable, callback) {
+async function readBuildTime(extensionPath, cancellable) {
     const file = Gio.File.new_for_path(`${extensionPath}/buildinfo.json`);
-    file.load_contents_async(cancellable, (f, res) => {
-        try {
-            const [, contents] = f.load_contents_finish(res);
-            const decoder = new TextDecoder();
-            const parsed = JSON.parse(decoder.decode(contents));
-            callback(parsed.buildTime ?? null);
-        } catch (e) {
-            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
-                return;
-            callback(null);
-        }
-    });
+    try {
+        const [contents] = await file.load_contents_async(cancellable);
+        return JSON.parse(new TextDecoder().decode(contents)).buildTime ?? null;
+    } catch (e) {
+        if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+            throw e;
+        return null;
+    }
 }
 
 const WhatCableIndicator = GObject.registerClass(
@@ -95,12 +91,7 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._buildTime = null;
         this._lastRefreshTime = null;
         this._settings = settings;
-        this._settingsChangedIds = [
-            this._settings.connect('changed::show-empty-ports',
-                () => this._rerenderDevices()),
-            this._settings.connect('changed::show-internal-devices',
-                () => this._rerenderDevices()),
-        ];
+        this._settingsChangedIds = [];
         this._lastDevices = null;
 
         const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
@@ -118,12 +109,11 @@ class WhatCableIndicator extends PanelMenu.Button {
         this.add_child(box);
 
         this._buildMenu();
-        readBuildTimeAsync(extensionPath, this._cancellable, buildTime => {
-            if (this._disposed)
-                return;
+        readBuildTime(extensionPath, this._cancellable).then(buildTime => {
+            if (this._disposed) return;
             this._buildTime = buildTime;
             this._updateDebugItems();
-        });
+        }).catch(() => {});
         this._refresh();
 
         this._menuOpenStateId = this.menu.connect('open-state-changed', (_menu, open) => {
@@ -155,24 +145,10 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._debugMenu = new PopupMenu.PopupSubMenuMenuItem('Debug info');
         this._buildTimeItem = new PopupMenu.PopupMenuItem('', {reactive: false});
         this._lastRefreshItem = new PopupMenu.PopupMenuItem('', {reactive: false});
-        this._showEmptyPortsItem = this._makeStickySwitch(
-            'Show empty ports', this._settings.get_boolean('show-empty-ports'),
-            state => this._settings.set_boolean('show-empty-ports', state));
-        this._showInternalDevicesItem = this._makeStickySwitch(
-            'Show internal devices', this._settings.get_boolean('show-internal-devices'),
-            state => this._settings.set_boolean('show-internal-devices', state));
-        // Keep the in-menu switches in sync with settings changes coming from
-        // elsewhere (the prefs window, dconf, etc.).
-        this._settingsChangedIds.push(
-            this._settings.connect('changed::show-empty-ports', () => {
-                this._showEmptyPortsItem.setToggleState(
-                    this._settings.get_boolean('show-empty-ports'));
-            }),
-            this._settings.connect('changed::show-internal-devices', () => {
-                this._showInternalDevicesItem.setToggleState(
-                    this._settings.get_boolean('show-internal-devices'));
-            }),
-        );
+        this._showEmptyPortsItem = this._bindStickySwitch(
+            'Show empty ports', 'show-empty-ports');
+        this._showInternalDevicesItem = this._bindStickySwitch(
+            'Show internal devices', 'show-internal-devices');
         this._debugMenu.menu.addMenuItem(this._buildTimeItem);
         this._debugMenu.menu.addMenuItem(this._lastRefreshItem);
         this._debugMenu.menu.addMenuItem(this._showEmptyPortsItem);
@@ -188,23 +164,21 @@ class WhatCableIndicator extends PanelMenu.Button {
             `Last refresh: ${this._lastRefreshTime ?? 'never'}`;
     }
 
-    _refresh() {
-        if (this._disposed || this._inFlight)
-            return;
+    async _refresh() {
+        if (this._disposed || this._inFlight) return;
         this._inFlight = true;
-        collectDevices().then(devices => {
-            this._inFlight = false;
-            if (this._disposed)
-                return;
+        try {
+            const devices = await collectDevices();
+            if (this._disposed) return;
             this._lastRefreshTime = new Date().toLocaleTimeString();
             this._updateDebugItems();
             this._showDevices(devices);
-        }).catch(e => {
+        } catch (e) {
+            if (!this._disposed)
+                this._showError(`Failed to read /sys: ${e.message}`);
+        } finally {
             this._inFlight = false;
-            if (this._disposed)
-                return;
-            this._showError(`Failed to read /sys: ${e.message}`);
-        });
+        }
     }
 
     _showError(message) {
@@ -214,15 +188,23 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._lastSignature = null;
     }
 
-    _makeStickySwitch(label, initial, onToggled) {
-        const item = new PopupMenu.PopupSwitchMenuItem(label, initial);
+    _bindStickySwitch(label, key) {
+        const item = new PopupMenu.PopupSwitchMenuItem(
+            label, this._settings.get_boolean(key));
         // Override activate() so clicking the switch toggles state without
         // bubbling the activate signal up to the parent menu (which would close it).
         item.activate = function (_event) {
             if (this._switch.mapped)
                 this.toggle();
         };
-        item.connect('toggled', (_i, state) => onToggled(state));
+        item.connect('toggled', (_i, state) => this._settings.set_boolean(key, state));
+        // Two-way: external changes (prefs window, dconf) flow back into
+        // the switch and trigger a re-render of the device list.
+        this._settingsChangedIds.push(
+            this._settings.connect(`changed::${key}`, () => {
+                item.setToggleState(this._settings.get_boolean(key));
+                this._rerenderDevices();
+            }));
         return item;
     }
 
