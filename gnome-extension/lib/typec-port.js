@@ -37,8 +37,7 @@ async function readIdentity(path) {
         relevant.map((name, i) => [name, reads[i]])
             .filter(([, val]) => val !== null));
 
-    if (vdos.id_header === undefined && Object.keys(vdos).length === 0)
-        return null;
+    if (Object.keys(vdos).length === 0) return null;
 
     return {
         vendorId: (vdos.id_header ?? 0) & 0xFFFF,

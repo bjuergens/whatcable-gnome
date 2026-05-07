@@ -69,16 +69,21 @@ function validateDevice(d) {
     return {ok: true, device: out};
 }
 
+// Returns the buildinfo.json timestamp, or null when the file isn't there
+// (pack/install setups that skip `make buildinfo`). Any other failure —
+// permission denied, malformed JSON — propagates so it surfaces in the
+// shell logs instead of silently rendering "unknown".
 async function readBuildTime(extensionPath, cancellable) {
     const file = Gio.File.new_for_path(`${extensionPath}/buildinfo.json`);
+    let contents;
     try {
-        const [contents] = await file.load_contents_async(cancellable);
-        return JSON.parse(new TextDecoder().decode(contents)).buildTime ?? null;
+        [contents] = await file.load_contents_async(cancellable);
     } catch (e) {
-        if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
-            throw e;
-        return null;
+        if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND))
+            return null;
+        throw e;
     }
+    return JSON.parse(new TextDecoder().decode(contents)).buildTime ?? null;
 }
 
 const WhatCableIndicator = GObject.registerClass(
@@ -113,7 +118,10 @@ class WhatCableIndicator extends PanelMenu.Button {
             if (this._disposed) return;
             this._buildTime = buildTime;
             this._updateDebugItems();
-        }).catch(() => {});
+        }).catch(e => {
+            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) return;
+            console.warn(`WhatCable: failed to read buildinfo.json: ${e.message}`);
+        });
         this._refresh();
 
         this._menuOpenStateId = this.menu.connect('open-state-changed', (_menu, open) => {
@@ -270,7 +278,8 @@ class WhatCableIndicator extends PanelMenu.Button {
     }
 
     _buildDeviceItem(dev) {
-        const item = new PopupMenu.PopupSubMenuMenuItem(dev.headline ?? 'USB device');
+        // headline is guaranteed non-empty by validateDevice.
+        const item = new PopupMenu.PopupSubMenuMenuItem(dev.headline);
 
         if (dev.subtitle) {
             const sub = new PopupMenu.PopupMenuItem(dev.subtitle, {reactive: false});

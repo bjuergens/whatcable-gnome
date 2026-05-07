@@ -1,6 +1,7 @@
 // Enumerate /sys/bus/usb/devices/.
 
 import * as Sysfs from './sysfs.js';
+import {formatVidPid} from './vendor-db.js';
 
 const USB_DEVICES_PATH = '/sys/bus/usb/devices';
 
@@ -117,8 +118,7 @@ async function readDevice(path, name) {
 }
 
 export function displayName(dev) {
-    if (dev.product) return dev.product;
-    return `${dev.vendorId.toString(16).padStart(4, '0')}:${dev.productId.toString(16).padStart(4, '0')}`;
+    return dev.product || formatVidPid(dev.vendorId, dev.productId);
 }
 
 export function deviceSpeedLabel(dev) {

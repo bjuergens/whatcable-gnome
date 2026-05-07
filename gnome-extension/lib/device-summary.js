@@ -3,7 +3,7 @@
 
 import {displayName, deviceSpeedLabel, devicePowerLabel} from './usb-device.js';
 import {currentDataRole, currentPowerRole, isConnected} from './typec-port.js';
-import {lookupVendor, formatHex16} from './vendor-db.js';
+import {lookupVendor, formatHex16, formatVidPid} from './vendor-db.js';
 import * as ClassDB from './usb-class-db.js';
 import {decodeIDHeader, productTypeLabel, cableSpeedLabel, cableCurrentLabel} from './pd-decoder.js';
 import * as ChargingDiagnostic from './charging-diagnostic.js';
@@ -16,10 +16,6 @@ const ICON_BY_DEVICE_TYPE = [
     ['Wireless',      'network-wireless'],
     ['Printer',       'printer'],
 ];
-
-function vidPidHex(vid, pid) {
-    return `${vid.toString(16).padStart(4, '0')}:${pid.toString(16).padStart(4, '0')}`;
-}
 
 function pickIcon(isHub, deviceType) {
     if (isHub) return 'network-wired';
@@ -61,7 +57,7 @@ export function fromUsbDevice(dev) {
         dev.interfaces.map(i => i.driver).filter(Boolean))];
     if (drivers.length > 0) bullets.push(`Drivers: ${drivers.join(', ')}`);
 
-    bullets.push(`VID:PID ${vidPidHex(dev.vendorId, dev.productId)}`);
+    bullets.push(`VID:PID ${formatVidPid(dev.vendorId, dev.productId)}`);
 
     return {
         category: dev.isHub ? 'hub' : 'usb',

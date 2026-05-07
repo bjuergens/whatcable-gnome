@@ -68,3 +68,7 @@ export function lookupVendor(vendorId) {
 export function formatHex16(id) {
     return `0x${id.toString(16).padStart(4, '0')}`;
 }
+
+export function formatVidPid(vendorId, productId) {
+    return `${vendorId.toString(16).padStart(4, '0')}:${productId.toString(16).padStart(4, '0')}`;
+}

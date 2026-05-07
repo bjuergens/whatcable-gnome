@@ -4,7 +4,7 @@
 // gated and may legitimately not exist on a given system. We translate
 // G_IO_ERROR_NOT_FOUND to null / [] so callers can treat absence as
 // "feature absent". Any other IO error (permission denied, EIO, …) propagates
-// — see AGENTS.md "fail loudly".
+// — see AGENTS.md, "We fail first".
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
