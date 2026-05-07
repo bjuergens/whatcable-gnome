@@ -18,6 +18,9 @@ Red flags from Ousterhout, tailored to this codebase.
 * are we failing fast? are errors loud? is there a chance of silently swallowing unexpected situations? were error/exceptions removed or downgraded?
 * is the implementation clever? or non obvious? or deviates from established princples?
 
+## coding style
+
+- **Bitwise unsigned.** JS bitwise ops are signed int32. Is `>>> 0` used to coerce a VDO to unsigned, and `>>>` (not `>>`) for right shifts that should not sign-extend?
 
 ## what to flag
 

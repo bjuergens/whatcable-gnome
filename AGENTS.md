@@ -38,15 +38,10 @@ lib/vendor-db.js / usb-class-db.js   small static lookup tables
 
 ## JS Style
 
-- **Lookup tables over switch ladders.** When the body is just `case X: return …`, use a small object/`Map` literal at module scope and look up with `?? fallback`. Examples: `pd-decoder.js`, `usb-class-db.js`, `power-delivery.js`'s PDO type maps.
-- **No sentinel-string returns.** A function that may not have an answer returns `null`; callers decide how to render. `vendor-db.js` exposes `lookupVendor()` (returns `null` on miss) and a separate `formatHex16()` for rendering — never encode "miss" as a magic string prefix.
-- **No sentinel numbers** like `portNumber: -1`. If a value can't be parsed, reject the whole entry (`return null` from the enumerator's per-item function and let the outer `.filter(Boolean)` drop it).
-- **Bitwise unsigned.** JS bitwise ops are signed int32. Use `>>> 0` to coerce a VDO to unsigned, and `>>>` (not `>>`) for right shifts that should not sign-extend.
 - **Render-side validation.** Anything `device-manager.collectDevices()` returns is treated by `extension.js#validateDevice` as a permissive shape — every field is type-checked before rendering and a malformed entry becomes a warning row rather than crashing the menu. When you add a new field, extend `validateDevice` first.
 
 ## Principles
 
-🎯 Simplest thing that works. No abstractions for hypothetical futures.
 📏 Big functions are fine. Extract when there's reuse or the established abstractions call for it.
 ⏳ No premature performance optimization.
 📋 Plans define what and done when, not how. Challenge a plan when it fights reality; don't silently deviate.
