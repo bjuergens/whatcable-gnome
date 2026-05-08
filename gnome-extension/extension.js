@@ -338,11 +338,7 @@ class WhatCableIndicator extends PanelMenu.Button {
         }
 
         for (const bullet of dev.bullets ?? []) {
-            // Bullets can be plain strings or {text, class} for one-off
-            // styling. With the no-custom-CSS approach we ignore any class
-            // hint and just render the text.
-            const text = typeof bullet === 'string' ? bullet : bullet.text;
-            const b = new PopupMenu.PopupMenuItem(`• ${text}`, {reactive: false});
+            const b = new PopupMenu.PopupMenuItem(`• ${bullet}`, {reactive: false});
             item.menu.addMenuItem(b);
         }
 
@@ -365,24 +361,22 @@ class WhatCableIndicator extends PanelMenu.Button {
         // expose it today so the marker would always be inert in the main
         // view; surfacing it only on demand keeps the popup quiet.
         const pdos = dev.powerDelivery?.sourceCapabilities ?? [];
-        const featured = new Set();
-        if (pdos.length > 0) {
-            const maxIdx = pdos.reduce(
-                (m, p, i) => p.powerMW > pdos[m].powerMW ? i : m, 0);
-            featured.add(maxIdx);
-            const pdo = pdos[maxIdx];
+        const maxIdx = pdos.length > 0
+            ? pdos.reduce((m, p, i) => p.powerMW > pdos[m].powerMW ? i : m, 0)
+            : -1;
+        if (maxIdx >= 0) {
             const p = new PopupMenu.PopupMenuItem(
-                `• ${formatPdoRow(pdo)}  ◀ max`, {reactive: false});
+                `• ${formatPdoRow(pdos[maxIdx])}  ◀ max`, {reactive: false});
             item.menu.addMenuItem(p);
         }
 
         if (this._settings.get_boolean('show-details'))
-            this._appendDetails(item, dev, pdos, featured);
+            this._appendDetails(item, dev, pdos, maxIdx);
 
         return item;
     }
 
-    _appendDetails(parent, dev, pdos, featuredPdoIndices) {
+    _appendDetails(parent, dev, pdos, featuredIdx) {
         // Surface the structured groups produced by device-summary.js as an
         // inline "Details" section. Nested PopupSubMenuMenuItems don't survive
         // activate-bubbling inside another submenu, so render flat.
@@ -393,7 +387,7 @@ class WhatCableIndicator extends PanelMenu.Button {
         if (dev.cable)         sections.push(['Cable', dev.cable, []]);
         if (dev.powerDelivery) sections.push(['Power Delivery', dev.powerDelivery, ['sourceCapabilities']]);
 
-        const extraPdos = pdos.filter((_, i) => !featuredPdoIndices.has(i));
+        const extraPdos = pdos.filter((_, i) => i !== featuredIdx);
 
         if (sections.length === 0 && extraPdos.length === 0) return;
 
