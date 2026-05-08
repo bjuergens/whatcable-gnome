@@ -15,6 +15,38 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {collectDevices} from './lib/device-manager.js';
 
+function formatMilli(m) {
+    return (m / 1000).toFixed(m % 1000 === 0 ? 0 : 1);
+}
+
+// Render one source-capability PDO row. Fixed PDOs read as a single voltage;
+// Variable / PPS / Battery / AVS span a range, and AVS additionally splits
+// current across the 9-15 V and 15-20 V segments — show both when present.
+function formatPdoRow(pdo) {
+    const W = Math.round(pdo.powerMW / 1000);
+    const Vmax = formatMilli(pdo.voltageMV);
+    const A = formatMilli(pdo.currentMA);
+    const hasMin = typeof pdo.minVoltageMV === 'number' && pdo.minVoltageMV > 0;
+    const Vmin = hasMin ? formatMilli(pdo.minVoltageMV) : null;
+    const label = pdo.typeLabel ? `${pdo.typeLabel}: ` : '';
+
+    let body;
+    if (pdo.type === 'battery') {
+        body = hasMin ? `${Vmin}–${Vmax}V — ${W}W` : `${Vmax}V — ${W}W`;
+    } else if (pdo.type === 'avs' &&
+               typeof pdo.currentMA9to15 === 'number' && pdo.currentMA9to15 > 0 &&
+               typeof pdo.currentMA15to20 === 'number' && pdo.currentMA15to20 > 0) {
+        const a9 = formatMilli(pdo.currentMA9to15);
+        const a20 = formatMilli(pdo.currentMA15to20);
+        body = `9–15V @ ${a9}A · 15–20V @ ${a20}A — up to ${W}W`;
+    } else if (hasMin && Vmin !== Vmax) {
+        body = `${Vmin}–${Vmax}V @ ${A}A — ${W}W`;
+    } else {
+        body = `${Vmax}V @ ${A}A — ${W}W`;
+    }
+    return `${label}${body}`;
+}
+
 // Permissive shape check for one device entry produced by collectDevices().
 // Returns {ok: true, device} where `device` is a sanitized copy holding only
 // well-typed fields (so a wrong-typed optional field degrades to "missing"
@@ -311,11 +343,8 @@ class WhatCableIndicator extends PanelMenu.Button {
         if (pdos.length > 0) {
             item.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Charger profiles'));
             for (const pdo of pdos) {
-                const v = (pdo.voltageMV / 1000).toFixed(pdo.voltageMV % 1000 === 0 ? 0 : 1);
-                const a = (pdo.currentMA / 1000).toFixed(pdo.currentMA % 1000 === 0 ? 0 : 1);
-                const w = Math.round(pdo.powerMW / 1000);
                 const marker = pdo.active ? '  ◀ active' : '';
-                const text = `${v}V @ ${a}A — ${w}W${marker}`;
+                const text = formatPdoRow(pdo) + marker;
                 const p = new PopupMenu.PopupMenuItem(text, {reactive: false});
                 p.label.style_class = pdo.active ? 'whatcable-ok' : 'whatcable-bullet';
                 item.menu.addMenuItem(p);

@@ -164,9 +164,13 @@ export function fromTypeCPort(port, pdPort, cable) {
 
         summary.powerDelivery = {
             sourceCapabilities: pdPort.sourceCapabilities.map(p => ({
-                type: p.typeLabel,
+                type: p.type,
+                typeLabel: p.typeLabel,
                 voltageMV: p.voltageMV,
+                minVoltageMV: p.minVoltageMV,
                 currentMA: p.currentMA,
+                currentMA9to15: p.currentMA9to15,
+                currentMA15to20: p.currentMA15to20,
                 powerMW: p.powerMW,
                 active: p.isActive,
             })),
