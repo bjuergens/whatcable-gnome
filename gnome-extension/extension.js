@@ -6,6 +6,7 @@
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -14,6 +15,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {collectDevices} from './lib/device-manager.js';
+import {collectIconStats} from './lib/icon-stats.js';
 import {sysfsToJson} from './lib/sysfsToJson.js';
 
 function formatMilli(m) {
@@ -115,12 +117,15 @@ class WhatCableIndicator extends PanelMenu.Button {
         super._init(0.0, 'WhatCable');
         this._disposed = false;
         this._inFlight = false;
+        this._iconInFlight = false;
         this._cancellable = new Gio.Cancellable();
         this._buildTime = null;
         this._lastRefreshTime = null;
         this._settings = settings;
         this._settingsChangedIds = [];
         this._lastDevices = null;
+        this._iconTimerId = 0;
+        this._menuOpen = false;
 
         const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
         this._icon = new St.Icon({
@@ -146,11 +151,65 @@ class WhatCableIndicator extends PanelMenu.Button {
             console.warn(`WhatCable: failed to read buildinfo.json: ${e.message}`);
         });
         this._refresh();
+        this._startIconTimer();
 
         this._menuOpenStateId = this.menu.connect('open-state-changed', (_menu, open) => {
-            if (open)
+            this._menuOpen = open;
+            if (open) {
+                this._stopIconTimer();
                 this._refresh();
+            } else {
+                this._startIconTimer();
+            }
         });
+
+        this._settingsChangedIds.push(
+            this._settings.connect('changed::refresh-interval', () => {
+                if (!this._menuOpen) {
+                    this._stopIconTimer();
+                    this._startIconTimer();
+                }
+            }));
+    }
+
+    _startIconTimer() {
+        if (this._iconTimerId || this._disposed) return;
+        const seconds = Math.max(1, this._settings.get_uint('refresh-interval'));
+        this._iconTimerId = GLib.timeout_add_seconds(
+            GLib.PRIORITY_DEFAULT, seconds, () => {
+                if (this._disposed) return GLib.SOURCE_REMOVE;
+                this._refreshIcon();
+                return GLib.SOURCE_CONTINUE;
+            });
+    }
+
+    _stopIconTimer() {
+        if (this._iconTimerId) {
+            GLib.Source.remove(this._iconTimerId);
+            this._iconTimerId = 0;
+        }
+    }
+
+    async _refreshIcon() {
+        if (this._disposed || this._iconInFlight || this._inFlight || this._menuOpen)
+            return;
+        this._iconInFlight = true;
+        try {
+            const {chargeW, dischargeW, externalCount} = await collectIconStats();
+            if (this._disposed) return;
+            this._updateBadge(chargeW, dischargeW, externalCount);
+        } catch (e) {
+            // Surface in shell logs; the badge keeps its previous value.
+            console.warn(`WhatCable icon refresh failed: ${e.message}`);
+        } finally {
+            this._iconInFlight = false;
+        }
+    }
+
+    _updateBadge(chargeW, dischargeW, externalCount) {
+        const net = chargeW - dischargeW;
+        const watts = net > 0 ? `+${net}W` : net < 0 ? `${net}W` : '0W';
+        this._countLabel.text = ` ${watts}·${externalCount}`;
     }
 
     _buildMenu() {
@@ -306,11 +365,9 @@ class WhatCableIndicator extends PanelMenu.Button {
             if (d.typec?.powerRole === 'sink') chargeW += w;
             else if (d.typec?.powerRole === 'source') dischargeW += w;
         }
-        const net = chargeW - dischargeW;
-        const watts = net > 0 ? `+${net}W` : net < 0 ? `${net}W` : '0W';
         const externalCount = devices.filter(d =>
             d.category !== 'typec' && d.usb?.removable !== 'fixed').length;
-        this._countLabel.text = ` ${watts}·${externalCount}`;
+        this._updateBadge(chargeW, dischargeW, externalCount);
 
         const count = visible.length;
         // Show the status row only on empty: with devices listed, "N USB
@@ -421,6 +478,7 @@ class WhatCableIndicator extends PanelMenu.Button {
 
     destroy() {
         this._disposed = true;
+        this._stopIconTimer();
         this._cancellable?.cancel();
         this._cancellable = null;
         if (this._menuOpenStateId) {
