@@ -12,5 +12,10 @@
       <summary>Show fixed internal USB devices</summary>
       <description>If true, include built-in (non-removable) USB devices such as internal hubs and webcams.</description>
     </key>
+    <key name="show-details" type="b">
+      <default>false</default>
+      <summary>Show device details</summary>
+      <description>If true, expand a Details section under each device with raw fields (vendor IDs, bus/device numbers, VDO-decoded partner/cable info, etc.).</description>
+    </key>
   </schema>
 </schemalist>

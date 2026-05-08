@@ -34,6 +34,14 @@ export default class WhatCablePreferences extends ExtensionPreferences {
         settings.bind('show-internal-devices', internalDevices, 'active',
             Gio.SettingsBindFlags.DEFAULT);
 
+        const details = new Adw.SwitchRow({
+            title: 'Show device details',
+            subtitle: 'Expand raw fields (vendor IDs, bus/device, VDO-decoded partner/cable info) under each device.',
+        });
+        group.add(details);
+        settings.bind('show-details', details, 'active',
+            Gio.SettingsBindFlags.DEFAULT);
+
         window.add(page);
     }
 }

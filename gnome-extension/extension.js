@@ -177,10 +177,13 @@ class WhatCableIndicator extends PanelMenu.Button {
             'Show empty ports', 'show-empty-ports');
         this._showInternalDevicesItem = this._bindStickySwitch(
             'Show internal devices', 'show-internal-devices');
+        this._showDetailsItem = this._bindStickySwitch(
+            'Show details', 'show-details');
         this._debugMenu.menu.addMenuItem(this._buildTimeItem);
         this._debugMenu.menu.addMenuItem(this._lastRefreshItem);
         this._debugMenu.menu.addMenuItem(this._showEmptyPortsItem);
         this._debugMenu.menu.addMenuItem(this._showInternalDevicesItem);
+        this._debugMenu.menu.addMenuItem(this._showDetailsItem);
         this.menu.addMenuItem(this._debugMenu);
         this._updateDebugItems();
     }
@@ -315,7 +318,8 @@ class WhatCableIndicator extends PanelMenu.Button {
             }
         }
 
-        this._appendDetails(item, dev);
+        if (this._settings.get_boolean('show-details'))
+            this._appendDetails(item, dev);
 
         return item;
     }
