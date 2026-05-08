@@ -347,35 +347,33 @@ class WhatCableIndicator extends PanelMenu.Button {
         }
 
         if (dev.charging?.summary) {
-            const prefix = dev.charging.isWarning ? '⚠ ' : '✓ ';
-            const c = new PopupMenu.PopupMenuItem(prefix + dev.charging.summary, {reactive: false});
+            // Same emoji-driven convention as bullets: ⚠ for warnings, ✓ for
+            // healthy info. Detail row indents so it reads as a follow-on.
+            const prefix = dev.charging.isWarning ? '⚠' : '✓';
+            const c = new PopupMenu.PopupMenuItem(
+                `• ${prefix} ${dev.charging.summary}`, {reactive: false});
             item.menu.addMenuItem(c);
             if (dev.charging.detail) {
-                const d = new PopupMenu.PopupMenuItem(dev.charging.detail, {reactive: false});
+                const d = new PopupMenu.PopupMenuItem(
+                    `    ${dev.charging.detail}`, {reactive: false});
                 item.menu.addMenuItem(d);
             }
         }
 
-        // Charger profiles main section: only the highest-power PDO and the
-        // currently-negotiated PDO (if known). The rest move to Details.
+        // Charger profiles main section: just the highest-power PDO. Active /
+        // negotiated-PDO information lives in Details — the kernel doesn't
+        // expose it today so the marker would always be inert in the main
+        // view; surfacing it only on demand keeps the popup quiet.
         const pdos = dev.powerDelivery?.sourceCapabilities ?? [];
         const featured = new Set();
         if (pdos.length > 0) {
             const maxIdx = pdos.reduce(
                 (m, p, i) => p.powerMW > pdos[m].powerMW ? i : m, 0);
             featured.add(maxIdx);
-            pdos.forEach((p, i) => { if (p.active) featured.add(i); });
-
-            pdos.forEach((pdo, i) => {
-                if (!featured.has(i)) return;
-                const marker = pdo.active && i === maxIdx ? '  ◀ active · max'
-                    : pdo.active                          ? '  ◀ active'
-                    : i === maxIdx                        ? '  ◀ max'
-                    : '';
-                const p = new PopupMenu.PopupMenuItem(
-                    `• ${formatPdoRow(pdo)}${marker}`, {reactive: false});
-                item.menu.addMenuItem(p);
-            });
+            const pdo = pdos[maxIdx];
+            const p = new PopupMenu.PopupMenuItem(
+                `• ${formatPdoRow(pdo)}  ◀ max`, {reactive: false});
+            item.menu.addMenuItem(p);
         }
 
         if (this._settings.get_boolean('show-details'))
@@ -404,6 +402,7 @@ class WhatCableIndicator extends PanelMenu.Button {
         const addLines = (header, lines) => {
             if (lines.length === 0) return;
             const h = new PopupMenu.PopupMenuItem(header, {reactive: false});
+            h.label.style_class = 'whatcable-section-header';
             parent.menu.addMenuItem(h);
             for (const line of lines) {
                 const m = new PopupMenu.PopupMenuItem(`  ${line}`, {reactive: false});
@@ -414,8 +413,16 @@ class WhatCableIndicator extends PanelMenu.Button {
         for (const [name, data, skip] of sections)
             addLines(name, detailLines(data, skip));
 
-        if (extraPdos.length > 0)
-            addLines('Other charger profiles', extraPdos.map(formatPdoRow));
+        // Other PDOs land here. Active marker — '◀ active' or '◀ active · max'
+        // when the kernel eventually surfaces it — lives in this section, not
+        // the main view, since today it's always inert.
+        if (extraPdos.length > 0) {
+            const lines = extraPdos.map(pdo => {
+                const marker = pdo.active ? '  ◀ active' : '';
+                return `${formatPdoRow(pdo)}${marker}`;
+            });
+            addLines('Other charger profiles', lines);
+        }
     }
 
     destroy() {

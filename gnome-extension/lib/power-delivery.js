@@ -28,7 +28,7 @@ export const PdProvenance = Object.freeze({
     Unknown: 'unknown',
 });
 
-export const PdoType = Object.freeze({
+const PdoType = Object.freeze({
     FixedSupply: 'fixed',
     Battery: 'battery',
     VariableSupply: 'variable',

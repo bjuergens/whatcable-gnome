@@ -7,9 +7,11 @@ import {decodeIDHeader, productTypeLabel, cableSpeedLabel, cableCurrentLabel} fr
 
 // Pango spans used in headline/bullet markup. Mirrors stylesheet.css colors so
 // markup-coloring and class-coloring stay visually consistent.
-const COLOR_OK = '#26a269';      // matches .whatcable-ok
-const COLOR_WARN = '#e5a50a';    // matches .whatcable-warning
-const COLOR_SOURCE = '#9141ac';  // sourcing-violet, only used inline
+// Inline Pango span colors for the typec headline. Kept in code (not CSS)
+// since they apply to substrings of one label via markup.
+const COLOR_OK = '#26a269';
+const COLOR_WARN = '#e5a50a';
+const COLOR_SOURCE = '#9141ac';
 
 const escapeMarkup = s => String(s)
     .replaceAll('&', '&amp;')
@@ -220,7 +222,6 @@ export function fromTypeCPort(port, pdPort, cable) {
         category: 'typec',
         headline: `🔌 ${portName}`,
         headlineMarkup: false,
-        headlineClass: null,
         subtitle: '',
         icon: 'plug',
         bullets: [],
@@ -238,7 +239,6 @@ export function fromTypeCPort(port, pdPort, cable) {
 
     if (!isConnected(port)) {
         summary.subtitle = 'Nothing connected';
-        summary.headlineClass = 'whatcable-empty-port';
         return summary;
     }
 
@@ -336,10 +336,11 @@ export function fromTypeCPort(port, pdPort, cable) {
     if (diag) summary.charging = diag;
 
     // Headline assembly. Three independent decorations:
-    //   - Prefix:  ⚠ replaces 🔌 when there's a charging warning (q2).
-    //   - Name:    amber when there's a charging warning (i).
-    //   - Wattage: green when sinking (h), violet when sourcing (l).
-    // Empty/disconnected ports already returned above with whatcable-empty-port.
+    //   - Prefix:  ⚠ replaces 🔌 when there's a charging warning.
+    //   - Name:    amber when there's a charging warning.
+    //   - Wattage: green when sinking, violet when sourcing.
+    // Empty/disconnected ports already returned above with the plain
+    // "🔌 USB-C Port N" headline, no markup applied.
     const isWarning = !!diag?.isWarning;
     const prefix = isWarning ? '⚠' : '🔌';
     const namePart = isWarning ? span(portName, COLOR_WARN) : escapeMarkup(portName);
@@ -354,13 +355,12 @@ export function fromTypeCPort(port, pdPort, cable) {
     summary.headline = `${prefix} ${namePart}${wattsPart}`;
     summary.headlineMarkup = true;
 
-    // Cable-limited diagnostic colors the cable bullet amber too (m), so the
-    // user sees *which* link is the problem alongside the title-level cue.
+    // Cable-limited diagnostic prepends a ⚠ to the cable bullet so the user
+    // sees *which* link is the problem alongside the title-level cue. Pure
+    // text — no CSS dependency.
     if (isWarning && cableBulletIndex >= 0) {
-        summary.bullets[cableBulletIndex] = {
-            text: summary.bullets[cableBulletIndex],
-            class: 'whatcable-warning',
-        };
+        const orig = summary.bullets[cableBulletIndex];
+        summary.bullets[cableBulletIndex] = `⚠ ${orig}`;
     }
 
     return summary;
