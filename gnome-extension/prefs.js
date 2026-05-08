@@ -1,5 +1,6 @@
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
+import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
@@ -40,6 +41,24 @@ export default class WhatCablePreferences extends ExtensionPreferences {
         });
         group.add(details);
         settings.bind('show-details', details, 'active',
+            Gio.SettingsBindFlags.DEFAULT);
+
+        const refreshGroup = new Adw.PreferencesGroup({
+            title: 'Refresh',
+            description: 'How often the panel icon polls sysfs while the menu is closed.',
+        });
+        page.add(refreshGroup);
+
+        const refreshAdjustment = new Gtk.Adjustment({
+            lower: 1, upper: 3600, step_increment: 1, page_increment: 5,
+        });
+        const refreshRow = new Adw.SpinRow({
+            title: 'Status-bar refresh interval',
+            subtitle: 'Seconds between icon updates (1–3600).',
+            adjustment: refreshAdjustment,
+        });
+        refreshGroup.add(refreshRow);
+        settings.bind('refresh-interval', refreshAdjustment, 'value',
             Gio.SettingsBindFlags.DEFAULT);
 
         window.add(page);
