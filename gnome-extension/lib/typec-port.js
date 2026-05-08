@@ -1,8 +1,10 @@
 // Enumerate /sys/class/typec/.
 
 import * as Sysfs from './sysfs.js';
+import {readPort as readPdPort, PdProvenance} from './power-delivery.js';
 
 const TYPEC_PATH = '/sys/class/typec';
+const PARTNER_PD_RE = /^pd\d+$/;
 const BRACKET_RE = /\[([^\]]+)\]/;
 const PORT_NUM_RE = /^port(\d+)$/;
 
@@ -46,6 +48,19 @@ async function readIdentity(path) {
     };
 }
 
+// UCSI drivers (e.g. ucsi_acpi) leave /sys/class/usb_power_delivery empty and
+// instead expose the partner's advertised PDOs inline under the typec partner
+// (port1-partner/pdN/). Layout matches usb_power_delivery so readPdPort parses
+// it as-is.
+async function readPartnerPdPorts(partnerPath) {
+    const entries = await Sysfs.listSubdirectories(partnerPath);
+    const pdEntries = entries.filter(e => PARTNER_PD_RE.test(e));
+    const ports = await Promise.all(
+        pdEntries.map(name => readPdPort(
+            `${partnerPath}/${name}`, name, PdProvenance.Partner)));
+    return ports.filter(p => p !== null);
+}
+
 async function readPort(path, name) {
     const numMatch = PORT_NUM_RE.exec(name);
     if (!numMatch) return null;
@@ -69,10 +84,12 @@ async function readPort(path, name) {
             Sysfs.readAttribute(`${partnerPath}/type`),
             Sysfs.readAttribute(`${partnerPath}/usb_power_delivery_revision`),
             readIdentity(partnerPath),
-        ]).then(([type, pdRevision, identity]) => ({
+            readPartnerPdPorts(partnerPath),
+        ]).then(([type, pdRevision, identity, pdPorts]) => ({
             type: type ?? '',
             pdRevision: pdRevision ?? '',
             identity,
+            pdPorts,
         }))
         : null;
 

@@ -4,6 +4,28 @@ import * as Sysfs from './sysfs.js';
 
 const PD_PATH = '/sys/class/usb_power_delivery';
 
+// Where a PD port's data came from. The kernel exposes "what *this* port can
+// source/sink" and "what the *partner* advertised" through the same sysfs
+// shape, and confusing the two means displaying the local port's mandatory
+// 5V/3A as if it were the charger's offer (see UCSI bug). Tag at read time so
+// downstream code can refuse to misattribute.
+export const PdProvenance = Object.freeze({
+    // Inline under /sys/class/typec/portN-partner/pdN/ — the charger's offer.
+    Partner: 'partner',
+    // /sys/class/usb_power_delivery entry whose device symlink resolves to a
+    // typec partner — also the charger's offer, just published differently.
+    PartnerClass: 'partner-class',
+    // /sys/class/usb_power_delivery entry owned by a local typec port — the
+    // host's own capabilities, NOT the charger's.
+    PortSelf: 'port-self',
+    // Class-dir entry whose ownership we couldn't resolve.
+    Unknown: 'unknown',
+});
+
+export function isPartnerProvenance(p) {
+    return p === PdProvenance.Partner || p === PdProvenance.PartnerClass;
+}
+
 export const PdoType = Object.freeze({
     FixedSupply: 'fixed',
     Battery: 'battery',
@@ -173,7 +195,7 @@ async function parseCapabilities(capsPath, role) {
     return pdos.sort((a, b) => a.index - b.index);
 }
 
-async function readPort(path, name) {
+export async function readPort(path, name, provenance = PdProvenance.Unknown) {
     const [revision, version, sourceCapabilities, sinkCapabilities] = await Promise.all([
         Sysfs.readAttribute(`${path}/revision`),
         Sysfs.readAttribute(`${path}/version`),
@@ -190,6 +212,7 @@ async function readPort(path, name) {
     return {
         sysfsPath: path,
         name,
+        provenance,
         revision: revision ?? '',
         version: version ?? '',
         sourceCapabilities,
@@ -198,10 +221,23 @@ async function readPort(path, name) {
     };
 }
 
+// Classify a /sys/class/usb_power_delivery/<name> entry by following its
+// `device` symlink: targets named `portN-partner` are charger-side, `portN`
+// are host-side. Anything else stays Unknown.
+function classifyClassEntry(entryPath) {
+    const owner = Sysfs.readSymlinkTargetBasename(`${entryPath}/device`);
+    if (!owner) return PdProvenance.Unknown;
+    if (owner.includes('-partner')) return PdProvenance.PartnerClass;
+    if (/^port\d+$/.test(owner)) return PdProvenance.PortSelf;
+    return PdProvenance.Unknown;
+}
+
 export async function enumeratePdPorts() {
     if (!Sysfs.pathExists(PD_PATH)) return [];
     const entries = await Sysfs.listSubdirectories(PD_PATH);
-    const ports = await Promise.all(
-        entries.map(name => readPort(`${PD_PATH}/${name}`, name)));
+    const ports = await Promise.all(entries.map(name => {
+        const entryPath = `${PD_PATH}/${name}`;
+        return readPort(entryPath, name, classifyClassEntry(entryPath));
+    }));
     return ports.filter(p => p !== null);
 }
