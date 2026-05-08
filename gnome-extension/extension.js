@@ -14,6 +14,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {collectDevices} from './lib/device-manager.js';
+import {sysfsToJson} from './lib/sysfsToJson.js';
 
 function formatMilli(m) {
     return (m / 1000).toFixed(m % 1000 === 0 ? 0 : 1);
@@ -22,15 +23,17 @@ function formatMilli(m) {
 // Render one source-capability PDO row. Fixed PDOs read as a single voltage;
 // Variable / PPS / Battery / AVS span a range, and AVS additionally splits
 // current across the 9-15 V and 15-20 V segments — show both when present.
-// `pdo.type` is the kernel enum ("fixed", "pps", …); `pdo.typeLabel` is the
-// human label used as the row prefix.
+// `pdo.type` is the kernel enum ("fixed", "pps", …); the type label prefixes
+// the row only when the shape is non-default — Fixed is the boring case and
+// the "V @ A — W" syntax already conveys it.
 function formatPdoRow(pdo) {
     const W = Math.round(pdo.powerMW / 1000);
     const Vmax = formatMilli(pdo.voltageMV);
     const A = formatMilli(pdo.currentMA);
     const hasMin = typeof pdo.minVoltageMV === 'number' && pdo.minVoltageMV > 0;
     const Vmin = hasMin ? formatMilli(pdo.minVoltageMV) : null;
-    const label = pdo.typeLabel ? `${pdo.typeLabel}: ` : '';
+    const label = pdo.type !== 'fixed' && pdo.typeLabel
+        ? `${pdo.typeLabel}: ` : '';
 
     let body;
     if (pdo.type === 'battery') {
@@ -151,14 +154,22 @@ class WhatCableIndicator extends PanelMenu.Button {
     }
 
     _buildMenu() {
+        // Pin the popup to a comfortable minimum width so opening different
+        // device cards doesn't reflow the whole menu. 320px fits the longest
+        // current row ("20V @ 3.3A — 65W ◀ active · max") with a bit of
+        // breathing room; longer rows will still expand the menu.
+        this.menu.box.set_style('min-width: 320px;');
+
         this._headerItem = new PopupMenu.PopupMenuItem('WhatCable', {reactive: false});
         this._headerItem.label.style_class = 'whatcable-header';
         this.menu.addMenuItem(this._headerItem);
 
+        // Refreshes happen on every menu open (see open-state-changed in
+        // _init) and on a "no devices found" state we use _statusItem to
+        // surface the empty-list hint. While there are devices we render
+        // them directly and skip the count line.
         this._statusItem = new PopupMenu.PopupMenuItem('Loading…', {reactive: false});
         this.menu.addMenuItem(this._statusItem);
-
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         this._devicesSection = new PopupMenu.PopupMenuSection();
         this._lastSignature = null;
@@ -166,11 +177,7 @@ class WhatCableIndicator extends PanelMenu.Button {
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        const refreshItem = new PopupMenu.PopupMenuItem('Refresh');
-        refreshItem.connect('activate', () => this._refresh());
-        this.menu.addMenuItem(refreshItem);
-
-        this._debugMenu = new PopupMenu.PopupSubMenuMenuItem('Debug info');
+        this._debugMenu = new PopupMenu.PopupSubMenuMenuItem('Options');
         this._buildTimeItem = new PopupMenu.PopupMenuItem('', {reactive: false});
         this._lastRefreshItem = new PopupMenu.PopupMenuItem('', {reactive: false});
         this._showEmptyPortsItem = this._bindStickySwitch(
@@ -184,6 +191,18 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._debugMenu.menu.addMenuItem(this._showEmptyPortsItem);
         this._debugMenu.menu.addMenuItem(this._showInternalDevicesItem);
         this._debugMenu.menu.addMenuItem(this._showDetailsItem);
+
+        this._debugMenu.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Dump sysfs to log'));
+        for (const [label, path] of [
+            ['Dump /sys/class/typec', '/sys/class/typec'],
+            ['Dump /sys/class/power_supply', '/sys/class/power_supply'],
+            ['Dump /sys/class/usb_power_delivery', '/sys/class/usb_power_delivery'],
+        ]) {
+            const item = new PopupMenu.PopupMenuItem(label);
+            item.connect('activate', () => this._dumpSysfs(path));
+            this._debugMenu.menu.addMenuItem(item);
+        }
+
         this.menu.addMenuItem(this._debugMenu);
         this._updateDebugItems();
     }
@@ -193,6 +212,15 @@ class WhatCableIndicator extends PanelMenu.Button {
             `Extension build: ${this._buildTime ?? 'unknown'}`;
         this._lastRefreshItem.label.text =
             `Last refresh: ${this._lastRefreshTime ?? 'never'}`;
+    }
+
+    async _dumpSysfs(path) {
+        try {
+            const tree = await sysfsToJson(path);
+            console.log(`WhatCable sysfs dump ${path}:\n${JSON.stringify(tree, null, 2)}`);
+        } catch (e) {
+            console.warn(`WhatCable sysfs dump ${path} failed: ${e.message}`);
+        }
     }
 
     async _refresh() {
@@ -266,11 +294,29 @@ class WhatCableIndicator extends PanelMenu.Button {
             return;
         this._lastSignature = signature;
 
+        // Panel badge: net wattage (sinks - sources, signed) and external
+        // (non-built-in) USB device count. Always shown, even at zero, so the
+        // badge layout doesn't reflow as power flow changes.
+        // "+65W·3" charging with 3 externals; "-15W·0" sourcing alone;
+        // "0W·0" idle; multiple ports are summed per direction.
+        let chargeW = 0, dischargeW = 0;
+        for (const d of devices) {
+            if (d.category !== 'typec') continue;
+            const w = Math.floor((d.powerDelivery?.maxPowerMW ?? 0) / 1000);
+            if (d.typec?.powerRole === 'sink') chargeW += w;
+            else if (d.typec?.powerRole === 'source') dischargeW += w;
+        }
+        const net = chargeW - dischargeW;
+        const watts = net > 0 ? `+${net}W` : net < 0 ? `${net}W` : '0W';
+        const externalCount = devices.filter(d =>
+            d.category !== 'typec' && d.usb?.removable !== 'fixed').length;
+        this._countLabel.text = ` ${watts}·${externalCount}`;
+
         const count = visible.length;
-        this._countLabel.text = count > 0 ? ` ${count}` : '';
-        this._statusItem.label.text = count === 0
-            ? 'No USB devices found'
-            : `${count} USB device${count === 1 ? '' : 's'}`;
+        // Show the status row only on empty: with devices listed, "N USB
+        // device(s)" duplicates what the user can already count.
+        this._statusItem.label.text = 'No USB devices found';
+        this._statusItem.actor.visible = count === 0;
 
         this._devicesSection.removeAll();
         for (const dev of visible)
@@ -279,6 +325,11 @@ class WhatCableIndicator extends PanelMenu.Button {
 
     _buildDeviceItem(dev) {
         const item = new PopupMenu.PopupSubMenuMenuItem(dev.headline);
+        // Pango markup is opt-in per device. device-summary uses it to color
+        // pieces of the typec headline (charging-green wattage, warning-amber
+        // name) without splitting the label into multiple actors.
+        if (dev.headlineMarkup)
+            item.label.clutter_text.set_use_markup(true);
 
         if (dev.subtitle) {
             const sub = new PopupMenu.PopupMenuItem(dev.subtitle, {reactive: false});
@@ -288,54 +339,44 @@ class WhatCableIndicator extends PanelMenu.Button {
 
         for (const bullet of dev.bullets ?? []) {
             const b = new PopupMenu.PopupMenuItem(`• ${bullet}`, {reactive: false});
-            b.label.style_class = 'whatcable-bullet';
             item.menu.addMenuItem(b);
         }
 
         if (dev.charging?.summary) {
-            const prefix = dev.charging.isWarning ? '⚠ ' : '✓ ';
-            const c = new PopupMenu.PopupMenuItem(prefix + dev.charging.summary, {reactive: false});
-            c.label.style_class = dev.charging.isWarning
-                ? 'whatcable-warning'
-                : 'whatcable-ok';
+            // Same emoji-driven convention as bullets: ⚠ for warnings, ✓ for
+            // healthy info. Detail row indents so it reads as a follow-on.
+            const prefix = dev.charging.isWarning ? '⚠' : '✓';
+            const c = new PopupMenu.PopupMenuItem(
+                `• ${prefix} ${dev.charging.summary}`, {reactive: false});
             item.menu.addMenuItem(c);
             if (dev.charging.detail) {
-                const d = new PopupMenu.PopupMenuItem(dev.charging.detail, {reactive: false});
-                d.label.style_class = 'whatcable-detail';
+                const d = new PopupMenu.PopupMenuItem(
+                    `    ${dev.charging.detail}`, {reactive: false});
                 item.menu.addMenuItem(d);
             }
         }
 
-        // Charger profiles main section: only the highest-power PDO and the
-        // currently-negotiated PDO (if known). The rest move to Details.
+        // Charger profiles main section: just the highest-power PDO. Active /
+        // negotiated-PDO information lives in Details — the kernel doesn't
+        // expose it today so the marker would always be inert in the main
+        // view; surfacing it only on demand keeps the popup quiet.
         const pdos = dev.powerDelivery?.sourceCapabilities ?? [];
-        const featured = new Set();
-        if (pdos.length > 0) {
-            const maxIdx = pdos.reduce(
-                (m, p, i) => p.powerMW > pdos[m].powerMW ? i : m, 0);
-            featured.add(maxIdx);
-            pdos.forEach((p, i) => { if (p.active) featured.add(i); });
-
-            item.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Charger profiles'));
-            pdos.forEach((pdo, i) => {
-                if (!featured.has(i)) return;
-                const marker = pdo.active
-                    ? '  ◀ active'
-                    : (i === maxIdx ? '  ◀ max' : '');
-                const p = new PopupMenu.PopupMenuItem(
-                    formatPdoRow(pdo) + marker, {reactive: false});
-                p.label.style_class = pdo.active ? 'whatcable-ok' : 'whatcable-bullet';
-                item.menu.addMenuItem(p);
-            });
+        const maxIdx = pdos.length > 0
+            ? pdos.reduce((m, p, i) => p.powerMW > pdos[m].powerMW ? i : m, 0)
+            : -1;
+        if (maxIdx >= 0) {
+            const p = new PopupMenu.PopupMenuItem(
+                `• ${formatPdoRow(pdos[maxIdx])}  ◀ max`, {reactive: false});
+            item.menu.addMenuItem(p);
         }
 
         if (this._settings.get_boolean('show-details'))
-            this._appendDetails(item, dev, pdos, featured);
+            this._appendDetails(item, dev, pdos, maxIdx);
 
         return item;
     }
 
-    _appendDetails(parent, dev, pdos, featuredPdoIndices) {
+    _appendDetails(parent, dev, pdos, featuredIdx) {
         // Surface the structured groups produced by device-summary.js as an
         // inline "Details" section. Nested PopupSubMenuMenuItems don't survive
         // activate-bubbling inside another submenu, so render flat.
@@ -346,7 +387,7 @@ class WhatCableIndicator extends PanelMenu.Button {
         if (dev.cable)         sections.push(['Cable', dev.cable, []]);
         if (dev.powerDelivery) sections.push(['Power Delivery', dev.powerDelivery, ['sourceCapabilities']]);
 
-        const extraPdos = pdos.filter((_, i) => !featuredPdoIndices.has(i));
+        const extraPdos = pdos.filter((_, i) => i !== featuredIdx);
 
         if (sections.length === 0 && extraPdos.length === 0) return;
 
@@ -355,11 +396,10 @@ class WhatCableIndicator extends PanelMenu.Button {
         const addLines = (header, lines) => {
             if (lines.length === 0) return;
             const h = new PopupMenu.PopupMenuItem(header, {reactive: false});
-            h.label.style_class = 'whatcable-subtitle';
+            h.label.style_class = 'whatcable-section-header';
             parent.menu.addMenuItem(h);
             for (const line of lines) {
                 const m = new PopupMenu.PopupMenuItem(`  ${line}`, {reactive: false});
-                m.label.style_class = 'whatcable-bullet';
                 parent.menu.addMenuItem(m);
             }
         };
@@ -367,8 +407,16 @@ class WhatCableIndicator extends PanelMenu.Button {
         for (const [name, data, skip] of sections)
             addLines(name, detailLines(data, skip));
 
-        if (extraPdos.length > 0)
-            addLines('Other charger profiles', extraPdos.map(formatPdoRow));
+        // Other PDOs land here. Active marker — '◀ active' or '◀ active · max'
+        // when the kernel eventually surfaces it — lives in this section, not
+        // the main view, since today it's always inert.
+        if (extraPdos.length > 0) {
+            const lines = extraPdos.map(pdo => {
+                const marker = pdo.active ? '  ◀ active' : '';
+                return `${formatPdoRow(pdo)}${marker}`;
+            });
+            addLines('Other charger profiles', lines);
+        }
     }
 
     destroy() {

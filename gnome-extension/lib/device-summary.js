@@ -5,6 +5,20 @@ import {lookupVendor} from './vendor-db.js';
 import * as ClassDB from './usb-class-db.js';
 import {decodeIDHeader, productTypeLabel, cableSpeedLabel, cableCurrentLabel} from './pd-decoder.js';
 
+// Pango spans used in headline/bullet markup. Mirrors stylesheet.css colors so
+// markup-coloring and class-coloring stay visually consistent.
+// Inline Pango span colors for the typec headline. Kept in code (not CSS)
+// since they apply to substrings of one label via markup.
+const COLOR_OK = '#26a269';
+const COLOR_WARN = '#e5a50a';
+const COLOR_SOURCE = '#9141ac';
+
+const escapeMarkup = s => String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+const span = (text, color) => `<span color="${color}">${escapeMarkup(text)}</span>`;
+
 const hex16 = id => `0x${id.toString(16).padStart(4, '0')}`;
 const vidPid = (v, p) => `${v.toString(16).padStart(4, '0')}:${p.toString(16).padStart(4, '0')}`;
 
@@ -57,11 +71,8 @@ function chargingDiagnostic(pdPort, cable) {
             isWarning: false,
         };
     }
-    return {
-        summary: `Charging well at ${activeW || chargerMaxW}W`,
-        detail: '',
-        isWarning: false,
-    };
+    // Healthy charging is shown in the headline (⚡ N/M W); no extra row.
+    return null;
 }
 
 const ICON_BY_DEVICE_TYPE = [
@@ -81,6 +92,23 @@ function pickIcon(isHub, deviceType) {
     return 'drive-removable-media-usb';
 }
 
+const EMOJI_BY_DEVICE_TYPE = [
+    ['Audio',         '🎧'],
+    ['HID',           '⌨'],
+    ['Mass Storage',  '💾'],
+    ['Video',         '📷'],
+    ['Wireless',      '📶'],
+    ['Printer',       '🖨'],
+];
+
+function typeEmoji(isHub, deviceType) {
+    if (isHub) return '🔀';
+    for (const [keyword, emoji] of EMOJI_BY_DEVICE_TYPE) {
+        if (deviceType.includes(keyword)) return emoji;
+    }
+    return '';
+}
+
 function deviceTypeFromInterfaces(interfaces) {
     const types = [];
     for (const iface of interfaces) {
@@ -94,30 +122,48 @@ function deviceTypeFromInterfaces(interfaces) {
 export function fromUsbDevice(dev) {
     const vendorName = lookupVendor(dev.vendorId);
 
+    // Class 0xEF (Miscellaneous) is the IAD/multi-function umbrella used by
+    // webcams, modern audio, etc. Treat it like 0/0xFF and derive the type
+    // from interfaces — "Miscellaneous" tells the user nothing useful.
+    const cls = dev.deviceClass;
+    const useInterfaces = cls === 0 || cls === 0xFF || cls === 0xEF;
     let deviceType = '';
-    if (dev.deviceClass !== 0 && dev.deviceClass !== 0xFF)
-        deviceType = ClassDB.className(dev.deviceClass);
+    if (!useInterfaces) deviceType = ClassDB.className(cls);
     else if (dev.interfaces.length > 0)
         deviceType = deviceTypeFromInterfaces(dev.interfaces);
 
     const subtitle = [vendorName, deviceType].filter(Boolean).join(' · ');
 
-    const bullets = [speedLabel(dev.speed)];
-    if (dev.maxPowerMA > 0) bullets.push(`Power: ${powerLabel(dev.maxPowerMA)}`);
-    if (dev.version) bullets.push(`USB ${dev.version}`);
+    const baseHeadline = dev.product || vidPid(dev.vendorId, dev.productId);
+    const emoji = typeEmoji(dev.isHub, deviceType);
+    const headline = emoji ? `${emoji} ${baseHeadline}` : baseHeadline;
+
+    // One condensed specs row: "USB 2.10 · 480 Mbps · 500 mA". Empty parts
+    // omitted; speed always present even at 0 ("Unknown speed") since the
+    // bullet would otherwise dangle as "USB 2.10 · ".
+    const specs = [];
+    if (dev.version) specs.push(`USB ${dev.version}`);
+    specs.push(speedLabel(dev.speed));
+    if (dev.maxPowerMA > 0) specs.push(powerLabel(dev.maxPowerMA));
+    const bullets = [specs.join(' · ')];
+
     if (dev.serial) bullets.push(`Serial: ${dev.serial}`);
-    if (dev.removable === 'removable') bullets.push('Removable');
-    else if (dev.removable === 'fixed') bullets.push('Built-in');
+    if (dev.removable === 'removable') bullets.push('🔄 Removable');
+    else if (dev.removable === 'fixed') bullets.push('🔩 Built-in');
 
     const drivers = [...new Set(
         dev.interfaces.map(i => i.driver).filter(Boolean))];
-    if (drivers.length > 0) bullets.push(`Drivers: ${drivers.join(', ')}`);
+    if (drivers.length > 0) bullets.push(`⚙ ${drivers.join(', ')}`);
 
-    bullets.push(`VID:PID ${vidPid(dev.vendorId, dev.productId)}`);
+    // VID:PID stays in Details unconditionally; on the main view we only show
+    // it when the subtitle didn't decode a vendor name (so the user has *some*
+    // identifier to google with).
+    if (!vendorName)
+        bullets.push(`VID:PID ${vidPid(dev.vendorId, dev.productId)}`);
 
     return {
         category: dev.isHub ? 'hub' : 'usb',
-        headline: dev.product || vidPid(dev.vendorId, dev.productId),
+        headline,
         subtitle,
         icon: pickIcon(dev.isHub, deviceType),
         bullets,
@@ -147,7 +193,9 @@ export function fromUsbDevice(dev) {
 function partnerSubtitle(partner) {
     if (!partner) return '';
     const idHeader = partner.identity?.vdos?.id_header;
-    if (idHeader === undefined) return 'Device connected';
+    // No decoded identity: stay silent — the bullets below already make it
+    // obvious that something is attached.
+    if (idHeader === undefined) return '';
 
     const hdr = decodeIDHeader(idHeader);
     const productLabel = productTypeLabel(hdr.ufpProductType);
@@ -155,21 +203,25 @@ function partnerSubtitle(partner) {
     return vendorLabel ? `${vendorLabel} — ${productLabel}` : productLabel;
 }
 
-function cableBullets(cable) {
-    const bullets = [];
-    if (cable.speed) bullets.push(`Cable speed: ${cableSpeedLabel(cable.speed)}`);
-    if (cable.currentRating) bullets.push(`Cable current: ${cableCurrentLabel(cable.currentRating)}`);
-    if (cable.maxWatts > 0) bullets.push(`Cable max power: ${cable.maxWatts}W`);
-    if (cable.cableType === 'active') bullets.push('Active cable');
-    else if (cable.cableType === 'passive') bullets.push('Passive cable');
-    if (cable.vendorName) bullets.push(`Cable vendor: ${cable.vendorName}`);
-    return bullets;
+// Single condensed cable line: "🔌 Passive · 5 Gbps · 3 A · 60W · Vendor".
+// Empty parts are omitted; type is always present (passive/active/unknown).
+function cableBullet(cable) {
+    const parts = [];
+    if (cable.cableType === 'active') parts.push('Active');
+    else if (cable.cableType === 'passive') parts.push('Passive');
+    if (cable.speed) parts.push(cableSpeedLabel(cable.speed));
+    if (cable.currentRating) parts.push(cableCurrentLabel(cable.currentRating));
+    if (cable.maxWatts > 0) parts.push(`${cable.maxWatts}W`);
+    if (cable.vendorName) parts.push(cable.vendorName);
+    return parts.length > 0 ? `🔌 ${parts.join(' · ')}` : null;
 }
 
 export function fromTypeCPort(port, pdPort, cable) {
+    const portName = `USB-C Port ${port.portNumber}`;
     const summary = {
         category: 'typec',
-        headline: `USB-C Port ${port.portNumber}`,
+        headline: `🔌 ${portName}`,
+        headlineMarkup: false,
         subtitle: '',
         icon: 'plug',
         bullets: [],
@@ -179,6 +231,8 @@ export function fromTypeCPort(port, pdPort, cable) {
             powerRole: currentPowerRole(port),
             portType: port.portType,
             powerOpMode: port.powerOpMode,
+            orientation: port.orientation && port.orientation !== 'unknown'
+                ? port.orientation : null,
             connected: isConnected(port),
         },
     };
@@ -190,26 +244,49 @@ export function fromTypeCPort(port, pdPort, cable) {
 
     summary.subtitle = partnerSubtitle(port.partner);
 
-    if (port.powerOpMode) summary.bullets.push(`Power mode: ${port.powerOpMode}`);
-    if (port.pdRevision) summary.bullets.push(`PD revision: ${port.pdRevision}`);
-    if (port.orientation && port.orientation !== 'unknown')
-        summary.bullets.push(`Plug orientation: ${port.orientation}`);
+    // Combine PD revision, data role, and power direction into one row, e.g.
+    // "PD 2.0 · 📱 Device · 🔋 Charging".
+    const dataRole = currentDataRole(port);
+    const powerRole = currentPowerRole(port);
+    const roleLabel = dataRole === 'host' ? '🖥 Host'
+        : dataRole === 'device' ? '📱 Device' : null;
+    const directionLabel = powerRole === 'sink' ? '🔋 Charging'
+        : powerRole === 'source' ? '⚡ Powering' : null;
+    const pdAndRole = [
+        port.pdRevision ? `PD ${port.pdRevision}` : null,
+        roleLabel,
+        directionLabel,
+    ].filter(Boolean).join(' · ');
+    if (pdAndRole) summary.bullets.push(pdAndRole);
+
+    // Partner advertises its own PD revision; surface only when it diverges
+    // from the port's, since that's the case where it tells you something new.
+    const partnerPd = port.partner?.pdRevision;
+    if (partnerPd && partnerPd !== '0.0' && partnerPd !== port.pdRevision)
+        summary.bullets.push(`Partner PD ${partnerPd}`);
 
     if (port.partner) {
         const idHeader = port.partner.identity?.vdos?.id_header;
         const hdr = idHeader !== undefined ? decodeIDHeader(idHeader) : null;
+        const vendorName = hdr ? lookupVendor(hdr.vendorId) : null;
+        if (vendorName) summary.bullets.push(`🏷 ${vendorName}`);
         summary.partner = {
             type: port.partner.type,
             productType: hdr?.ufpProductType ?? null,
             productTypeLabel: hdr ? productTypeLabel(hdr.ufpProductType) : null,
             vendorId: hdr ? hex16(hdr.vendorId) : null,
-            vendorName: hdr ? lookupVendor(hdr.vendorId) : null,
+            vendorName,
             pdRevision: port.partner.pdRevision || null,
         };
     }
 
+    let cableBulletIndex = -1;
     if (cable) {
-        summary.bullets.push(...cableBullets(cable));
+        const line = cableBullet(cable);
+        if (line) {
+            cableBulletIndex = summary.bullets.length;
+            summary.bullets.push(line);
+        }
         summary.cable = {
             type: cable.cableType,
             speed: cable.speed,
@@ -223,9 +300,15 @@ export function fromTypeCPort(port, pdPort, cable) {
         };
     }
 
+    let wattsText = '';
     if (pdPort?.sourceCapabilities.length > 0) {
         const maxW = Math.floor(pdPort.maxSourcePowerMW / 1000);
-        summary.bullets.push(`Charger max: ${maxW}W`);
+        // Active PDO is not exposed by /sys today (see power-delivery.js); fall
+        // back to maxW/maxW so the headline reads "⚡ 65/65 W" until the kernel
+        // surfaces it, at which point this becomes "⚡ <active>/<max> W".
+        const active = pdPort.sourceCapabilities.find(p => p.isActive);
+        const activeW = active ? Math.floor(active.powerMW / 1000) : maxW;
+        if (maxW > 0) wattsText = `${activeW}/${maxW} W`;
         if (pdPort.version && pdPort.revision !== port.pdRevision)
             summary.bullets.push(`PD spec version: ${pdPort.version}`);
 
@@ -251,6 +334,34 @@ export function fromTypeCPort(port, pdPort, cable) {
 
     const diag = chargingDiagnostic(pdPort, cable);
     if (diag) summary.charging = diag;
+
+    // Headline assembly. Three independent decorations:
+    //   - Prefix:  ⚠ replaces 🔌 when there's a charging warning.
+    //   - Name:    amber when there's a charging warning.
+    //   - Wattage: green when sinking, violet when sourcing.
+    // Empty/disconnected ports already returned above with the plain
+    // "🔌 USB-C Port N" headline, no markup applied.
+    const isWarning = !!diag?.isWarning;
+    const prefix = isWarning ? '⚠' : '🔌';
+    const namePart = isWarning ? span(portName, COLOR_WARN) : escapeMarkup(portName);
+
+    let wattsPart = '';
+    if (wattsText) {
+        const color = powerRole === 'sink' ? COLOR_OK
+            : powerRole === 'source' ? COLOR_SOURCE : null;
+        const watts = color ? span(wattsText, color) : escapeMarkup(wattsText);
+        wattsPart = ` — ⚡ ${watts}`;
+    }
+    summary.headline = `${prefix} ${namePart}${wattsPart}`;
+    summary.headlineMarkup = true;
+
+    // Cable-limited diagnostic prepends a ⚠ to the cable bullet so the user
+    // sees *which* link is the problem alongside the title-level cue. Pure
+    // text — no CSS dependency.
+    if (isWarning && cableBulletIndex >= 0) {
+        const orig = summary.bullets[cableBulletIndex];
+        summary.bullets[cableBulletIndex] = `⚠ ${orig}`;
+    }
 
     return summary;
 }

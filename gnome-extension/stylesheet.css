@@ -8,25 +8,9 @@
 }
 
 .whatcable-subtitle {
-    opacity: 0.75;
-    font-size: 0.95em;
+    font-style: italic;
 }
 
-.whatcable-bullet {
-    opacity: 0.85;
-    font-size: 0.95em;
-}
-
-.whatcable-detail {
-    opacity: 0.6;
-    font-size: 0.9em;
-    padding-left: 1.2em;
-}
-
-.whatcable-ok {
-    color: #26a269;
-}
-
-.whatcable-warning {
-    color: #e5a50a;
+.whatcable-section-header {
+    font-weight: bold;
 }
