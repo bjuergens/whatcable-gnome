@@ -5,18 +5,23 @@
 // Files     → trimmed string value, or { _error, _path, _reason } sentinel
 //             when unreadable (write-only, binary, EIO, etc.).
 // Dirs      → nested object, one key per child.
-// Symlinks  → { _symlink: '<basename>' } leaf. We deliberately do NOT recurse
+// Symlinks  → { _symlink: '<basename>' } leaf (or `_symlink: null` if the
+//             target couldn't be resolved). We deliberately do NOT recurse
 //             into symlinks: /sys is a graph reified as a tree and following
 //             links blows up size and risks cycles. The basename of the
 //             symlink target is enough for the things sysfs links express
 //             (e.g. typec/portN/usb_power_delivery → sourceN, iface/driver →
 //             usbhid, pd-class-entry/device → port0-partner).
 //
-// `sysfsToJson(root)` itself returns an *array* — one element per immediate
-// child of `root` (matching the shape of /sys/class/typec, /sys/class/power_supply,
-// etc. where each child is a distinct device). Each element has a `_name`
-// property and, when the entry was itself a symlink, `_symlinkTarget` with the
-// basename of where it pointed.
+// Cost model: `load_contents_async` (one open/read/close per regular file)
+// dominates. Sysfs has thousands of files most callers don't read — pass
+// `{files}` (Set or predicate) to bound that work; unmatched files are
+// omitted from the output. Directories are always traversed (enumerate is
+// cheap, one syscall per dir) and symlinks are always recorded.
+//
+// `sysfsToJson(root)` returns an *array* — one element per immediate child
+// of `root`. Each element has a `_name` property and, when the entry was
+// itself a symlink, `_symlinkTarget` with the basename of where it pointed.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -63,7 +68,7 @@ async function _readFile(path) {
 
 function _symlinkBasename(info) {
     const target = info.get_symlink_target();
-    return target ? GLib.path_get_basename(target) : '';
+    return target ? GLib.path_get_basename(target) : null;
 }
 
 async function _dirToObject(path, depth, allowFile) {
