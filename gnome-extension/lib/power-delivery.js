@@ -1,6 +1,6 @@
 // Enumerate /sys/class/usb_power_delivery/.
 
-import * as Sysfs from './sysfs.js';
+import {sysfsToJson, asString, asInt, symlinkTarget} from './sysfsToJson.js';
 
 const PD_PATH = '/sys/class/usb_power_delivery';
 
@@ -10,15 +10,9 @@ const PD_PATH = '/sys/class/usb_power_delivery';
 // 5V/3A as if it were the charger's offer (see UCSI bug). Tag at read time so
 // downstream code can refuse to misattribute.
 export const PdProvenance = Object.freeze({
-    // Inline under /sys/class/typec/portN-partner/pdN/ — the charger's offer.
     Partner: 'partner',
-    // /sys/class/usb_power_delivery entry whose device symlink resolves to a
-    // typec partner — also the charger's offer, just published differently.
     PartnerClass: 'partner-class',
-    // /sys/class/usb_power_delivery entry owned by a local typec port — the
-    // host's own capabilities, NOT the charger's.
     PortSelf: 'port-self',
-    // Class-dir entry whose ownership we couldn't resolve.
     Unknown: 'unknown',
 });
 
@@ -68,89 +62,65 @@ function splitDirname(name) {
 
 const watts = (mV, mA) => mV > 0 && mA > 0 ? Math.floor((mV * mA) / 1000) : 0;
 
-async function readFixed(pdoPath, role) {
+function readFixed(pdo, role) {
     const currentAttr = role === 'sink' ? 'operational_current' : 'maximum_current';
-    const [voltage, current, peak] = await Promise.all([
-        Sysfs.readIntAttribute(`${pdoPath}/voltage`),
-        Sysfs.readIntAttribute(`${pdoPath}/${currentAttr}`),
-        role === 'source'
-            ? Sysfs.readIntAttribute(`${pdoPath}/peak_current`)
-            : Promise.resolve(null),
-    ]);
-    const voltageMV = voltage ?? 0;
-    const currentMA = current ?? 0;
+    const voltageMV = asInt(pdo.voltage) ?? 0;
+    const currentMA = asInt(pdo[currentAttr]) ?? 0;
+    const peak = role === 'source' ? asInt(pdo.peak_current) : null;
     return {
         voltageMV, currentMA, powerMW: watts(voltageMV, currentMA),
         peakCurrentMA: peak ?? 0,
     };
 }
 
-async function readVariable(pdoPath, role) {
+function readVariable(pdo, role) {
     const currentAttr = role === 'sink' ? 'operational_current' : 'maximum_current';
-    const [maxV, minV, current] = await Promise.all([
-        Sysfs.readIntAttribute(`${pdoPath}/maximum_voltage`),
-        Sysfs.readIntAttribute(`${pdoPath}/minimum_voltage`),
-        Sysfs.readIntAttribute(`${pdoPath}/${currentAttr}`),
-    ]);
-    const voltageMV = maxV ?? 0;
-    const currentMA = current ?? 0;
+    const voltageMV = asInt(pdo.maximum_voltage) ?? 0;
+    const currentMA = asInt(pdo[currentAttr]) ?? 0;
     return {
         voltageMV, currentMA, powerMW: watts(voltageMV, currentMA),
-        minVoltageMV: minV ?? 0,
+        minVoltageMV: asInt(pdo.minimum_voltage) ?? 0,
     };
 }
 
-async function readBattery(pdoPath, role) {
+function readBattery(pdo, role) {
     const powerAttr = role === 'sink' ? 'operational_power' : 'maximum_power';
-    const [maxV, minV, power] = await Promise.all([
-        Sysfs.readIntAttribute(`${pdoPath}/maximum_voltage`),
-        Sysfs.readIntAttribute(`${pdoPath}/minimum_voltage`),
-        Sysfs.readIntAttribute(`${pdoPath}/${powerAttr}`),
-    ]);
-    const voltageMV = maxV ?? 0;
-    const powerMW = power ?? 0;
+    const voltageMV = asInt(pdo.maximum_voltage) ?? 0;
+    const powerMW = asInt(pdo[powerAttr]) ?? 0;
     // Battery PDOs advertise power, not current. Synthesize the top-end
     // effective current so existing UI rows ("V @ A — W") render numerically.
     const currentMA = voltageMV > 0 ? Math.floor((powerMW * 1000) / voltageMV) : 0;
-    return {voltageMV, currentMA, powerMW, minVoltageMV: minV ?? 0};
+    return {
+        voltageMV, currentMA, powerMW,
+        minVoltageMV: asInt(pdo.minimum_voltage) ?? 0,
+    };
 }
 
-async function readPPS(pdoPath, role) {
-    const [maxV, minV, maxI, ppsLimited] = await Promise.all([
-        Sysfs.readIntAttribute(`${pdoPath}/maximum_voltage`),
-        Sysfs.readIntAttribute(`${pdoPath}/minimum_voltage`),
-        Sysfs.readIntAttribute(`${pdoPath}/maximum_current`),
-        role === 'source'
-            ? Sysfs.readIntAttribute(`${pdoPath}/pps_power_limited`)
-            : Promise.resolve(null),
-    ]);
-    const voltageMV = maxV ?? 0;
-    const currentMA = maxI ?? 0;
+function readPPS(pdo, role) {
+    const voltageMV = asInt(pdo.maximum_voltage) ?? 0;
+    const currentMA = asInt(pdo.maximum_current) ?? 0;
+    const ppsLimited = role === 'source' ? asInt(pdo.pps_power_limited) : null;
     return {
         voltageMV, currentMA, powerMW: watts(voltageMV, currentMA),
-        minVoltageMV: minV ?? 0,
+        minVoltageMV: asInt(pdo.minimum_voltage) ?? 0,
         ppsPowerLimited: ppsLimited === 1,
     };
 }
 
-async function readAVS(pdoPath, role) {
+function readAVS(pdo, role) {
     // SPR-AVS spans 9-20 V with two separate current limits and (source-only)
     // a peak current. Headline numbers reflect the upper segment so the
     // common "max watts" path stays meaningful; raw fields preserve detail.
-    const [i15to20, i9to15, peak] = await Promise.all([
-        Sysfs.readIntAttribute(`${pdoPath}/maximum_current_15V_to_20V`),
-        Sysfs.readIntAttribute(`${pdoPath}/maximum_current_9V_to_15V`),
-        role === 'source'
-            ? Sysfs.readIntAttribute(`${pdoPath}/peak_current`)
-            : Promise.resolve(null),
-    ]);
+    const i15to20 = asInt(pdo.maximum_current_15V_to_20V) ?? 0;
+    const i9to15 = asInt(pdo.maximum_current_9V_to_15V) ?? 0;
+    const peak = role === 'source' ? asInt(pdo.peak_current) : null;
     const voltageMV = 20000;
-    const currentMA = i15to20 ?? 0;
+    const currentMA = i15to20;
     return {
         voltageMV, currentMA, powerMW: watts(voltageMV, currentMA),
         minVoltageMV: 9000,
-        currentMA9to15: i9to15 ?? 0,
-        currentMA15to20: i15to20 ?? 0,
+        currentMA9to15: i9to15,
+        currentMA15to20: i15to20,
         peakCurrentMA: peak ?? 0,
     };
 }
@@ -163,12 +133,12 @@ const PDO_READERS = {
     [PdoType.AVS]: readAVS,
 };
 
-async function parsePdo(pdoPath, entryName, role) {
+function parsePdo(pdo, entryName, role) {
     const {index, suffix} = splitDirname(entryName);
     const type = PDO_TYPE_FROM_DIRNAME[suffix] ?? PdoType.Unknown;
     const reader = PDO_READERS[type];
     const fields = reader
-        ? await reader(pdoPath, role)
+        ? reader(pdo, role)
         : {voltageMV: 0, currentMA: 0, powerMW: 0};
     return {
         index, type,
@@ -178,30 +148,28 @@ async function parsePdo(pdoPath, entryName, role) {
         // — verified against Documentation/ABI/testing/sysfs-class-usb_power_delivery
         // and drivers/usb/typec/pd.c. The PD Request Data Object lives inside
         // the controller and is only reachable via driver-specific debugfs
-        // (e.g. /sys/kernel/debug/tcpm/) or PD trace events.
-        // /sys/class/typec/portN/power_operation_mode signals *whether* PD is
-        // in use ("usb_power_delivery") but not which PDO; the typec port
-        // surfaces it as the "Power mode" bullet rather than per-PDO. Until
-        // something better lands upstream, every PDO renders as inactive.
+        // (e.g. /sys/kernel/debug/tcpm/) or PD trace events. Until something
+        // better lands upstream, every PDO renders as inactive.
         isActive: false,
     };
 }
 
-async function parseCapabilities(capsPath, role) {
-    if (!Sysfs.pathExists(capsPath)) return [];
-    const entries = await Sysfs.listSubdirectories(capsPath);
-    const pdos = await Promise.all(entries.map(e =>
-        parsePdo(`${capsPath}/${e}`, e, role)));
+function parseCapabilities(capsObj, role) {
+    if (!capsObj || typeof capsObj !== 'object' || capsObj._error) return [];
+    const pdos = [];
+    for (const [name, val] of Object.entries(capsObj)) {
+        if (!val || typeof val !== 'object' || val._error || val._symlink !== undefined)
+            continue;
+        pdos.push(parsePdo(val, name, role));
+    }
     return pdos.sort((a, b) => a.index - b.index);
 }
 
-export async function readPort(path, name, provenance = PdProvenance.Unknown) {
-    const [revision, version, sourceCapabilities, sinkCapabilities] = await Promise.all([
-        Sysfs.readAttribute(`${path}/revision`),
-        Sysfs.readAttribute(`${path}/version`),
-        parseCapabilities(`${path}/source-capabilities`, 'source'),
-        parseCapabilities(`${path}/sink-capabilities`, 'sink'),
-    ]);
+// `entry` is one element of sysfsToJson('/sys/class/usb_power_delivery') or a
+// pdN/ subobject hanging off a typec partner — both share the same shape.
+export function readPort(entry, name, provenance = PdProvenance.Unknown) {
+    const sourceCapabilities = parseCapabilities(entry['source-capabilities'], 'source');
+    const sinkCapabilities = parseCapabilities(entry['sink-capabilities'], 'sink');
 
     if (sourceCapabilities.length === 0 && sinkCapabilities.length === 0)
         return null;
@@ -210,11 +178,10 @@ export async function readPort(path, name, provenance = PdProvenance.Unknown) {
         (max, pdo) => Math.max(max, pdo.powerMW), 0);
 
     return {
-        sysfsPath: path,
         name,
         provenance,
-        revision: revision ?? '',
-        version: version ?? '',
+        revision: asString(entry.revision) ?? '',
+        version: asString(entry.version) ?? '',
         sourceCapabilities,
         sinkCapabilities,
         maxSourcePowerMW,
@@ -224,8 +191,8 @@ export async function readPort(path, name, provenance = PdProvenance.Unknown) {
 // Classify a /sys/class/usb_power_delivery/<name> entry by following its
 // `device` symlink: targets named `portN-partner` are charger-side, `portN`
 // are host-side. Anything else stays Unknown.
-function classifyClassEntry(entryPath) {
-    const owner = Sysfs.readSymlinkTargetBasename(`${entryPath}/device`);
+function classifyClassEntry(entry) {
+    const owner = symlinkTarget(entry.device);
     if (!owner) return PdProvenance.Unknown;
     if (owner.includes('-partner')) return PdProvenance.PartnerClass;
     if (/^port\d+$/.test(owner)) return PdProvenance.PortSelf;
@@ -233,11 +200,11 @@ function classifyClassEntry(entryPath) {
 }
 
 export async function enumeratePdPorts() {
-    if (!Sysfs.pathExists(PD_PATH)) return [];
-    const entries = await Sysfs.listSubdirectories(PD_PATH);
-    const ports = await Promise.all(entries.map(name => {
-        const entryPath = `${PD_PATH}/${name}`;
-        return readPort(entryPath, name, classifyClassEntry(entryPath));
-    }));
-    return ports.filter(p => p !== null);
+    const tree = await sysfsToJson(PD_PATH);
+    const ports = [];
+    for (const entry of tree) {
+        const port = readPort(entry, entry._name, classifyClassEntry(entry));
+        if (port) ports.push(port);
+    }
+    return ports;
 }
