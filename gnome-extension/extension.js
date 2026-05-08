@@ -294,19 +294,23 @@ class WhatCableIndicator extends PanelMenu.Button {
             return;
         this._lastSignature = signature;
 
-        // Panel badge: current charging wattage + count of external (non-
-        // built-in) USB devices. Both pulled from the unfiltered device list
-        // so the badge reflects reality rather than what the popup chose to
-        // hide. "65W·3" combined; either part omitted when its value is zero.
-        const sinkingW = devices
-            .filter(d => d.category === 'typec' && d.typec?.powerRole === 'sink')
-            .reduce((m, d) => m + Math.floor((d.powerDelivery?.maxPowerMW ?? 0) / 1000), 0);
+        // Panel badge: net wattage (sinks - sources, signed) and external
+        // (non-built-in) USB device count. Always shown, even at zero, so the
+        // badge layout doesn't reflow as power flow changes.
+        // "+65W·3" charging with 3 externals; "-15W·0" sourcing alone;
+        // "0W·0" idle; multiple ports are summed per direction.
+        let chargeW = 0, dischargeW = 0;
+        for (const d of devices) {
+            if (d.category !== 'typec') continue;
+            const w = Math.floor((d.powerDelivery?.maxPowerMW ?? 0) / 1000);
+            if (d.typec?.powerRole === 'sink') chargeW += w;
+            else if (d.typec?.powerRole === 'source') dischargeW += w;
+        }
+        const net = chargeW - dischargeW;
+        const watts = net > 0 ? `+${net}W` : net < 0 ? `${net}W` : '0W';
         const externalCount = devices.filter(d =>
             d.category !== 'typec' && d.usb?.removable !== 'fixed').length;
-        const parts = [];
-        if (sinkingW > 0) parts.push(`${sinkingW}W`);
-        if (externalCount > 0) parts.push(String(externalCount));
-        this._countLabel.text = parts.length > 0 ? ` ${parts.join('·')}` : '';
+        this._countLabel.text = ` ${watts}·${externalCount}`;
 
         const count = visible.length;
         // Show the status row only on empty: with devices listed, "N USB
