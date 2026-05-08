@@ -154,6 +154,12 @@ class WhatCableIndicator extends PanelMenu.Button {
     }
 
     _buildMenu() {
+        // Pin the popup to a comfortable minimum width so opening different
+        // device cards doesn't reflow the whole menu. 320px fits the longest
+        // current row ("20V @ 3.3A — 65W ◀ active · max") with a bit of
+        // breathing room; longer rows will still expand the menu.
+        this.menu.box.set_style('min-width: 320px;');
+
         this._headerItem = new PopupMenu.PopupMenuItem('WhatCable', {reactive: false});
         this._headerItem.label.style_class = 'whatcable-header';
         this.menu.addMenuItem(this._headerItem);
