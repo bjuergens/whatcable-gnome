@@ -1,6 +1,5 @@
 // USB vendor ID → human-readable name. `lookupVendor` returns null when the
-// VID isn't in the table; callers decide whether to render the hex form via
-// `formatHex16` (also used for productIds, which share the same 16-bit layout).
+// VID isn't in the table; callers decide whether to render the hex form.
 
 const VENDORS = new Map([
     [0x05AC, 'Apple'],
@@ -63,12 +62,4 @@ const VENDORS = new Map([
 
 export function lookupVendor(vendorId) {
     return VENDORS.get(vendorId) ?? null;
-}
-
-export function formatHex16(id) {
-    return `0x${id.toString(16).padStart(4, '0')}`;
-}
-
-export function formatVidPid(vendorId, productId) {
-    return `${vendorId.toString(16).padStart(4, '0')}:${productId.toString(16).padStart(4, '0')}`;
 }

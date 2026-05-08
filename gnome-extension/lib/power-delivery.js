@@ -22,10 +22,6 @@ export const PdProvenance = Object.freeze({
     Unknown: 'unknown',
 });
 
-export function isPartnerProvenance(p) {
-    return p === PdProvenance.Partner || p === PdProvenance.PartnerClass;
-}
-
 export const PdoType = Object.freeze({
     FixedSupply: 'fixed',
     Battery: 'battery',
@@ -57,13 +53,10 @@ function pdoTypeLabel(type) {
     return PDO_TYPE_LABELS[type] ?? 'Unknown';
 }
 
-function splitDirname(name) {
+// PDO directory names look like "1:fixed_supply", "2:programmable_supply", …
+function pdoSuffix(name) {
     const colon = name.lastIndexOf(':');
-    if (colon < 0) return {index: parseInt(name, 10) || 0, suffix: name};
-    return {
-        index: parseInt(name.slice(0, colon), 10) || 0,
-        suffix: name.slice(colon + 1),
-    };
+    return colon < 0 ? name : name.slice(colon + 1);
 }
 
 const watts = (mV, mA) => mV > 0 && mA > 0 ? Math.floor((mV * mA) / 1000) : 0;
@@ -164,14 +157,13 @@ const PDO_READERS = {
 };
 
 async function parsePdo(pdoPath, entryName, role) {
-    const {index, suffix} = splitDirname(entryName);
-    const type = PDO_TYPE_FROM_DIRNAME[suffix] ?? PdoType.Unknown;
+    const type = PDO_TYPE_FROM_DIRNAME[pdoSuffix(entryName)] ?? PdoType.Unknown;
     const reader = PDO_READERS[type];
     const fields = reader
         ? await reader(pdoPath, role)
         : {voltageMV: 0, currentMA: 0, powerMW: 0};
     return {
-        index, type,
+        type,
         typeLabel: pdoTypeLabel(type),
         ...fields,
         // The negotiated PDO index is not exposed by /sys/class/usb_power_delivery
@@ -189,10 +181,11 @@ async function parsePdo(pdoPath, entryName, role) {
 
 async function parseCapabilities(capsPath, role) {
     if (!Sysfs.pathExists(capsPath)) return [];
+    // Sysfs.listSubdirectories already returns sorted names; PDO dirs
+    // ("1:fixed_supply", …) sort lexicographically into kernel order for ≤9
+    // entries, which matches the spec's max of 7 source PDOs.
     const entries = await Sysfs.listSubdirectories(capsPath);
-    const pdos = await Promise.all(entries.map(e =>
-        parsePdo(`${capsPath}/${e}`, e, role)));
-    return pdos.sort((a, b) => a.index - b.index);
+    return Promise.all(entries.map(e => parsePdo(`${capsPath}/${e}`, e, role)));
 }
 
 export async function readPort(path, name, provenance = PdProvenance.Unknown) {

@@ -1,14 +1,17 @@
 // Single entrypoint for the panel indicator: returns the device list as
-// JSON-shaped objects ready for validateDevice() / _buildDeviceItem().
+// JSON-shaped objects consumed by extension.js _buildDeviceItem().
 
 import {enumerateUsbDevices} from './usb-device.js';
 import {enumerateTypecPorts} from './typec-port.js';
-import {enumeratePdPorts, PdProvenance, isPartnerProvenance} from './power-delivery.js';
+import {enumeratePdPorts, PdProvenance} from './power-delivery.js';
 import {decodeIDHeader, decodeCableVDO, ProductType} from './pd-decoder.js';
 import {lookupVendor} from './vendor-db.js';
 import * as DeviceSummary from './device-summary.js';
 
 // USB-C cable e-marker info derived from typec cable identity VDOs.
+// `cableType` is the source of truth ("active" / "passive" / ""); a cable VDO
+// can override the kernel-reported type (a passive-typed entry can decode as
+// an active cable per its e-marker).
 function cableInfo(cable) {
     if (!cable) return null;
     const idHeader = cable.identity?.vdos?.id_header;
@@ -22,8 +25,6 @@ function cableInfo(cable) {
         speed: null,
         currentRating: null,
         maxWatts: 0,
-        isActive: cable.type === 'active',
-        isPassive: cable.type === 'passive',
         vendorId,
         vendorName: vendorId ? lookupVendor(vendorId) : null,
     };
@@ -36,8 +37,7 @@ function cableInfo(cable) {
         speed: cableVdo.speed,
         currentRating: cableVdo.currentRating,
         maxWatts: cableVdo.maxWatts,
-        isActive: cableVdo.isActive,
-        isPassive: !cableVdo.isActive,
+        cableType: cableVdo.isActive ? 'active' : 'passive',
     };
 }
 
@@ -51,7 +51,9 @@ function pairPdPort(tcPort, pdPorts, typecCount) {
     // is only useful as a hint — we still gate on provenance below.
     if (tcPort.pdPortName) {
         const named = pdPorts.find(pd => pd.name === tcPort.pdPortName);
-        if (named && isPartnerProvenance(named.provenance)) return named;
+        if (named && (named.provenance === PdProvenance.Partner ||
+                      named.provenance === PdProvenance.PartnerClass))
+            return named;
     }
     // UCSI: partner exposes its PDOs inline; tagged Partner at read time.
     const partnerPds = tcPort.partner?.pdPorts ?? [];
