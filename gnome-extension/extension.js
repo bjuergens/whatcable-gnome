@@ -316,6 +316,7 @@ class WhatCableIndicator extends PanelMenu.Button {
 
         if (dev.subtitle) {
             const sub = new PopupMenu.PopupMenuItem(dev.subtitle, {reactive: false});
+            sub.label.style_class = 'whatcable-subtitle';
             item.menu.addMenuItem(sub);
         }
 
