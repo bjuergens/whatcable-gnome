@@ -1,7 +1,7 @@
 // Enumerate /sys/class/typec/.
 
 import * as Sysfs from './sysfs.js';
-import {readPort as readPdPort} from './power-delivery.js';
+import {readPort as readPdPort, PdProvenance} from './power-delivery.js';
 
 const TYPEC_PATH = '/sys/class/typec';
 const PARTNER_PD_RE = /^pd\d+$/;
@@ -56,7 +56,8 @@ async function readPartnerPdPorts(partnerPath) {
     const entries = await Sysfs.listSubdirectories(partnerPath);
     const pdEntries = entries.filter(e => PARTNER_PD_RE.test(e));
     const ports = await Promise.all(
-        pdEntries.map(name => readPdPort(`${partnerPath}/${name}`, name)));
+        pdEntries.map(name => readPdPort(
+            `${partnerPath}/${name}`, name, PdProvenance.Partner)));
     return ports.filter(p => p !== null);
 }
 
