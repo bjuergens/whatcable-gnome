@@ -23,15 +23,17 @@ function formatMilli(m) {
 // Render one source-capability PDO row. Fixed PDOs read as a single voltage;
 // Variable / PPS / Battery / AVS span a range, and AVS additionally splits
 // current across the 9-15 V and 15-20 V segments — show both when present.
-// `pdo.type` is the kernel enum ("fixed", "pps", …); `pdo.typeLabel` is the
-// human label used as the row prefix.
+// `pdo.type` is the kernel enum ("fixed", "pps", …); the type label prefixes
+// the row only when the shape is non-default — Fixed is the boring case and
+// the "V @ A — W" syntax already conveys it.
 function formatPdoRow(pdo) {
     const W = Math.round(pdo.powerMW / 1000);
     const Vmax = formatMilli(pdo.voltageMV);
     const A = formatMilli(pdo.currentMA);
     const hasMin = typeof pdo.minVoltageMV === 'number' && pdo.minVoltageMV > 0;
     const Vmin = hasMin ? formatMilli(pdo.minVoltageMV) : null;
-    const label = pdo.typeLabel ? `${pdo.typeLabel}: ` : '';
+    const label = pdo.type !== 'fixed' && pdo.typeLabel
+        ? `${pdo.typeLabel}: ` : '';
 
     let body;
     if (pdo.type === 'battery') {
@@ -341,9 +343,10 @@ class WhatCableIndicator extends PanelMenu.Button {
             item.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Charger profiles'));
             pdos.forEach((pdo, i) => {
                 if (!featured.has(i)) return;
-                const marker = pdo.active
-                    ? '  ◀ active'
-                    : (i === maxIdx ? '  ◀ max' : '');
+                const marker = pdo.active && i === maxIdx ? '  ◀ active · max'
+                    : pdo.active                          ? '  ◀ active'
+                    : i === maxIdx                        ? '  ◀ max'
+                    : '';
                 const p = new PopupMenu.PopupMenuItem(
                     formatPdoRow(pdo) + marker, {reactive: false});
                 p.label.style_class = pdo.active ? 'whatcable-ok' : 'whatcable-bullet';

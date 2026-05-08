@@ -191,15 +191,20 @@ export function fromTypeCPort(port, pdPort, cable) {
 
     summary.subtitle = partnerSubtitle(port.partner);
 
-    if (port.pdRevision) summary.bullets.push(`PD ${port.pdRevision}`);
+    // Combine PD revision and data role into one row, e.g. "PD 2.0 · 🖥 Host".
+    const dataRole = currentDataRole(port);
+    const roleLabel = dataRole === 'host' ? '🖥 Host'
+        : dataRole === 'device' ? '📱 Device' : null;
+    const pdAndRole = [
+        port.pdRevision ? `PD ${port.pdRevision}` : null,
+        roleLabel,
+    ].filter(Boolean).join(' · ');
+    if (pdAndRole) summary.bullets.push(pdAndRole);
+
     // Partner advertises its own PD revision; surface only when it diverges
     // from the port's, since that's the case where it tells you something new.
     if (port.partner?.pdRevision && port.partner.pdRevision !== port.pdRevision)
         summary.bullets.push(`Partner PD ${port.partner.pdRevision}`);
-
-    const dataRole = currentDataRole(port);
-    if (dataRole === 'host') summary.bullets.push('🖥 Host');
-    else if (dataRole === 'device') summary.bullets.push('📱 Device');
 
     if (port.partner) {
         const idHeader = port.partner.identity?.vdos?.id_header;
