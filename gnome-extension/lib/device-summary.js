@@ -150,7 +150,7 @@ export function fromTypeCPort(port, pdPort, cable) {
 
     if (cable) {
         summary.bullets.push(...cableBullets(cable));
-        if (port.cable?.pdRevision)
+        if (port.cable?.pdRevision && port.cable.pdRevision !== port.pdRevision)
             summary.bullets.push(`Cable PD revision: ${port.cable.pdRevision}`);
         summary.cable = {
             type: cable.cableType,
@@ -166,7 +166,7 @@ export function fromTypeCPort(port, pdPort, cable) {
     if (pdPort?.sourceCapabilities.length > 0) {
         const maxW = Math.floor(pdPort.maxSourcePowerMW / 1000);
         summary.bullets.push(`Charger max: ${maxW}W`);
-        if (pdPort.version)
+        if (pdPort.version && pdPort.revision !== port.pdRevision)
             summary.bullets.push(`PD spec: rev ${pdPort.revision} v${pdPort.version}`);
 
         // type/typeKey: `type` keeps the human label (back-compat with

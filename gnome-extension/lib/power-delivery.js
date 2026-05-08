@@ -48,13 +48,19 @@ const watts = (mV, mA) => mV > 0 && mA > 0 ? Math.floor((mV * mA) / 1000) : 0;
 
 async function readFixed(pdoPath, role) {
     const currentAttr = role === 'sink' ? 'operational_current' : 'maximum_current';
-    const [voltage, current] = await Promise.all([
+    const [voltage, current, peak] = await Promise.all([
         Sysfs.readIntAttribute(`${pdoPath}/voltage`),
         Sysfs.readIntAttribute(`${pdoPath}/${currentAttr}`),
+        role === 'source'
+            ? Sysfs.readIntAttribute(`${pdoPath}/peak_current`)
+            : Promise.resolve(null),
     ]);
     const voltageMV = voltage ?? 0;
     const currentMA = current ?? 0;
-    return {voltageMV, currentMA, powerMW: watts(voltageMV, currentMA)};
+    return {
+        voltageMV, currentMA, powerMW: watts(voltageMV, currentMA),
+        peakCurrentMA: peak ?? 0,
+    };
 }
 
 async function readVariable(pdoPath, role) {
