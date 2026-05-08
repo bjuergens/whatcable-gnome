@@ -190,18 +190,8 @@ export function fromTypeCPort(port, pdPort, cable) {
 
     summary.subtitle = partnerSubtitle(port.partner);
 
-    const dataStr = currentDataRole(port);
-    const powerStr = currentPowerRole(port);
-    if (dataStr || powerStr) {
-        const parts = [];
-        if (dataStr)  parts.push(`Data: ${dataStr}`);
-        if (powerStr) parts.push(`Power: ${powerStr}`);
-        summary.bullets.push(parts.join(', '));
-    }
     if (port.powerOpMode) summary.bullets.push(`Power mode: ${port.powerOpMode}`);
     if (port.pdRevision) summary.bullets.push(`PD revision: ${port.pdRevision}`);
-    if (port.partner?.pdRevision && port.partner.pdRevision !== port.pdRevision)
-        summary.bullets.push(`Partner PD revision: ${port.partner.pdRevision}`);
     if (port.orientation && port.orientation !== 'unknown')
         summary.bullets.push(`Plug orientation: ${port.orientation}`);
 
@@ -220,8 +210,6 @@ export function fromTypeCPort(port, pdPort, cable) {
 
     if (cable) {
         summary.bullets.push(...cableBullets(cable));
-        if (port.cable?.pdRevision && port.cable.pdRevision !== port.pdRevision)
-            summary.bullets.push(`Cable PD revision: ${port.cable.pdRevision}`);
         summary.cable = {
             type: cable.cableType,
             speed: cable.speed,

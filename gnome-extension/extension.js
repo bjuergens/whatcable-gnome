@@ -306,53 +306,69 @@ class WhatCableIndicator extends PanelMenu.Button {
             }
         }
 
+        // Charger profiles main section: only the highest-power PDO and the
+        // currently-negotiated PDO (if known). The rest move to Details.
         const pdos = dev.powerDelivery?.sourceCapabilities ?? [];
+        const featured = new Set();
         if (pdos.length > 0) {
+            const maxIdx = pdos.reduce(
+                (m, p, i) => p.powerMW > pdos[m].powerMW ? i : m, 0);
+            featured.add(maxIdx);
+            pdos.forEach((p, i) => { if (p.active) featured.add(i); });
+
             item.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Charger profiles'));
-            for (const pdo of pdos) {
-                const marker = pdo.active ? '  ◀ active' : '';
-                const text = formatPdoRow(pdo) + marker;
-                const p = new PopupMenu.PopupMenuItem(text, {reactive: false});
+            pdos.forEach((pdo, i) => {
+                if (!featured.has(i)) return;
+                const marker = pdo.active
+                    ? '  ◀ active'
+                    : (i === maxIdx ? '  ◀ max' : '');
+                const p = new PopupMenu.PopupMenuItem(
+                    formatPdoRow(pdo) + marker, {reactive: false});
                 p.label.style_class = pdo.active ? 'whatcable-ok' : 'whatcable-bullet';
                 item.menu.addMenuItem(p);
-            }
+            });
         }
 
         if (this._settings.get_boolean('show-details'))
-            this._appendDetails(item, dev);
+            this._appendDetails(item, dev, pdos, featured);
 
         return item;
     }
 
-    _appendDetails(parent, dev) {
+    _appendDetails(parent, dev, pdos, featuredPdoIndices) {
         // Surface the structured groups produced by device-summary.js as an
-        // inline "Details" section, one separator per group. Nested
-        // PopupSubMenuMenuItems don't survive activate-bubbling inside another
-        // submenu (clicking them closes the parent), so we render flat.
+        // inline "Details" section. Nested PopupSubMenuMenuItems don't survive
+        // activate-bubbling inside another submenu, so render flat.
         const sections = [];
+        if (dev.typec)         sections.push(['Type-C', dev.typec, ['port', 'connected']]);
         if (dev.usb)           sections.push(['USB', dev.usb, []]);
         if (dev.partner)       sections.push(['Partner', dev.partner, []]);
         if (dev.cable)         sections.push(['Cable', dev.cable, []]);
         if (dev.powerDelivery) sections.push(['Power Delivery', dev.powerDelivery, ['sourceCapabilities']]);
-        if (sections.length === 0) return;
 
-        let any = false;
-        for (const [name, data, skip] of sections) {
-            const lines = detailLines(data, skip);
-            if (lines.length === 0) continue;
-            if (!any) {
-                parent.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Details'));
-                any = true;
-            }
-            const header = new PopupMenu.PopupMenuItem(name, {reactive: false});
-            header.label.style_class = 'whatcable-subtitle';
-            parent.menu.addMenuItem(header);
+        const extraPdos = pdos.filter((_, i) => !featuredPdoIndices.has(i));
+
+        if (sections.length === 0 && extraPdos.length === 0) return;
+
+        parent.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Details'));
+
+        const addLines = (header, lines) => {
+            if (lines.length === 0) return;
+            const h = new PopupMenu.PopupMenuItem(header, {reactive: false});
+            h.label.style_class = 'whatcable-subtitle';
+            parent.menu.addMenuItem(h);
             for (const line of lines) {
                 const m = new PopupMenu.PopupMenuItem(`  ${line}`, {reactive: false});
                 m.label.style_class = 'whatcable-bullet';
                 parent.menu.addMenuItem(m);
             }
-        }
+        };
+
+        for (const [name, data, skip] of sections)
+            addLines(name, detailLines(data, skip));
+
+        if (extraPdos.length > 0)
+            addLines('Other charger profiles', extraPdos.map(formatPdoRow));
     }
 
     destroy() {
