@@ -63,15 +63,6 @@ function pdoTypeLabel(type) {
     return PDO_TYPE_LABELS[type] ?? 'Unknown';
 }
 
-function splitDirname(name) {
-    const colon = name.lastIndexOf(':');
-    if (colon < 0) return {index: parseInt(name, 10) || 0, suffix: name};
-    return {
-        index: parseInt(name.slice(0, colon), 10) || 0,
-        suffix: name.slice(colon + 1),
-    };
-}
-
 const watts = (mV, mA) => mV > 0 && mA > 0 ? Math.floor((mV * mA) / 1000) : 0;
 
 function readFixed(pdo, role) {
@@ -146,14 +137,15 @@ const PDO_READERS = {
 };
 
 function parsePdo(pdo, entryName, role) {
-    const {index, suffix} = splitDirname(entryName);
+    const colon = entryName.lastIndexOf(':');
+    const suffix = colon < 0 ? entryName : entryName.slice(colon + 1);
     const type = PDO_TYPE_FROM_DIRNAME[suffix] ?? PdoType.Unknown;
     const reader = PDO_READERS[type];
     const fields = reader
         ? reader(pdo, role)
         : {voltageMV: 0, currentMA: 0, powerMW: 0};
     return {
-        index, type,
+        type,
         typeLabel: pdoTypeLabel(type),
         ...fields,
         // The negotiated PDO index is not exposed by /sys/class/usb_power_delivery
@@ -168,13 +160,16 @@ function parsePdo(pdo, entryName, role) {
 
 function parseCapabilities(capsObj, role) {
     if (!capsObj || typeof capsObj !== 'object' || capsObj._error) return [];
+    // Object.entries preserves insertion order from sysfsToJson's sorted
+    // listing. PDO dirnames ("1:fixed_supply", …) sort lexicographically into
+    // kernel order for ≤9 entries, which matches the spec's max of 7 PDOs.
     const pdos = [];
     for (const [name, val] of Object.entries(capsObj)) {
         if (!val || typeof val !== 'object' || val._error || val._symlink !== undefined)
             continue;
         pdos.push(parsePdo(val, name, role));
     }
-    return pdos.sort((a, b) => a.index - b.index);
+    return pdos;
 }
 
 // `entry` is one element of sysfsToJson('/sys/class/usb_power_delivery') or a
