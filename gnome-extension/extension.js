@@ -158,10 +158,12 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._headerItem.label.style_class = 'whatcable-header';
         this.menu.addMenuItem(this._headerItem);
 
+        // Refreshes happen on every menu open (see open-state-changed in
+        // _init) and on a "no devices found" state we use _statusItem to
+        // surface the empty-list hint. While there are devices we render
+        // them directly and skip the count line.
         this._statusItem = new PopupMenu.PopupMenuItem('Loading…', {reactive: false});
         this.menu.addMenuItem(this._statusItem);
-
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         this._devicesSection = new PopupMenu.PopupMenuSection();
         this._lastSignature = null;
@@ -169,11 +171,7 @@ class WhatCableIndicator extends PanelMenu.Button {
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        const refreshItem = new PopupMenu.PopupMenuItem('Refresh');
-        refreshItem.connect('activate', () => this._refresh());
-        this.menu.addMenuItem(refreshItem);
-
-        this._debugMenu = new PopupMenu.PopupSubMenuMenuItem('Debug info');
+        this._debugMenu = new PopupMenu.PopupSubMenuMenuItem('Options');
         this._buildTimeItem = new PopupMenu.PopupMenuItem('', {reactive: false});
         this._lastRefreshItem = new PopupMenu.PopupMenuItem('', {reactive: false});
         this._showEmptyPortsItem = this._bindStickySwitch(
@@ -292,9 +290,10 @@ class WhatCableIndicator extends PanelMenu.Button {
 
         const count = visible.length;
         this._countLabel.text = count > 0 ? ` ${count}` : '';
-        this._statusItem.label.text = count === 0
-            ? 'No USB devices found'
-            : `${count} USB device${count === 1 ? '' : 's'}`;
+        // Show the status row only on empty: with devices listed, "N USB
+        // device(s)" duplicates what the user can already count.
+        this._statusItem.label.text = 'No USB devices found';
+        this._statusItem.actor.visible = count === 0;
 
         this._devicesSection.removeAll();
         for (const dev of visible)
@@ -347,7 +346,7 @@ class WhatCableIndicator extends PanelMenu.Button {
                     : i === maxIdx                        ? '  ◀ max'
                     : '';
                 const p = new PopupMenu.PopupMenuItem(
-                    formatPdoRow(pdo) + marker, {reactive: false});
+                    `• ${formatPdoRow(pdo)}${marker}`, {reactive: false});
                 p.label.style_class = pdo.active ? 'whatcable-ok' : 'whatcable-bullet';
                 item.menu.addMenuItem(p);
             });
