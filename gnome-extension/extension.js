@@ -14,6 +14,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {collectDevices} from './lib/device-manager.js';
+import {sysfsToJson} from './lib/sysfsToJson.js';
 
 function formatMilli(m) {
     return (m / 1000).toFixed(m % 1000 === 0 ? 0 : 1);
@@ -184,6 +185,23 @@ class WhatCableIndicator extends PanelMenu.Button {
         this._debugMenu.menu.addMenuItem(this._showEmptyPortsItem);
         this._debugMenu.menu.addMenuItem(this._showInternalDevicesItem);
         this._debugMenu.menu.addMenuItem(this._showDetailsItem);
+
+        this._debugMenu.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Dump sysfs to log'));
+        for (const [label, path] of [
+            ['Dump /sys/class/typec', '/sys/class/typec'],
+            ['Dump /sys/class/power_supply', '/sys/class/power_supply'],
+            ['Dump /sys/class/usb_power_delivery', '/sys/class/usb_power_delivery'],
+        ]) {
+            const item = new PopupMenu.PopupMenuItem(label);
+            item.connect('activate', () => this._dumpSysfs(path));
+            this._debugMenu.menu.addMenuItem(item);
+        }
+        const hint = new PopupMenu.PopupMenuItem(
+            'View log: journalctl --user -f /usr/bin/gnome-shell',
+            {reactive: false});
+        hint.label.style_class = 'whatcable-detail';
+        this._debugMenu.menu.addMenuItem(hint);
+
         this.menu.addMenuItem(this._debugMenu);
         this._updateDebugItems();
     }
@@ -193,6 +211,15 @@ class WhatCableIndicator extends PanelMenu.Button {
             `Extension build: ${this._buildTime ?? 'unknown'}`;
         this._lastRefreshItem.label.text =
             `Last refresh: ${this._lastRefreshTime ?? 'never'}`;
+    }
+
+    async _dumpSysfs(path) {
+        try {
+            const tree = await sysfsToJson(path);
+            console.log(`WhatCable sysfs dump ${path}:\n${JSON.stringify(tree, null, 2)}`);
+        } catch (e) {
+            console.warn(`WhatCable sysfs dump ${path} failed: ${e.message}`);
+        }
     }
 
     async _refresh() {
