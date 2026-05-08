@@ -78,6 +78,23 @@ function pickIcon(isHub, deviceType) {
     return 'drive-removable-media-usb';
 }
 
+const EMOJI_BY_DEVICE_TYPE = [
+    ['Audio',         '🎧'],
+    ['HID',           '⌨'],
+    ['Mass Storage',  '💾'],
+    ['Video',         '📷'],
+    ['Wireless',      '📶'],
+    ['Printer',       '🖨'],
+];
+
+function typeEmoji(isHub, deviceType) {
+    if (isHub) return '🔀';
+    for (const [keyword, emoji] of EMOJI_BY_DEVICE_TYPE) {
+        if (deviceType.includes(keyword)) return emoji;
+    }
+    return '';
+}
+
 function deviceTypeFromInterfaces(interfaces) {
     const types = [];
     for (const iface of interfaces) {
@@ -91,30 +108,48 @@ function deviceTypeFromInterfaces(interfaces) {
 export function fromUsbDevice(dev) {
     const vendorName = lookupVendor(dev.vendorId);
 
+    // Class 0xEF (Miscellaneous) is the IAD/multi-function umbrella used by
+    // webcams, modern audio, etc. Treat it like 0/0xFF and derive the type
+    // from interfaces — "Miscellaneous" tells the user nothing useful.
+    const cls = dev.deviceClass;
+    const useInterfaces = cls === 0 || cls === 0xFF || cls === 0xEF;
     let deviceType = '';
-    if (dev.deviceClass !== 0 && dev.deviceClass !== 0xFF)
-        deviceType = ClassDB.className(dev.deviceClass);
+    if (!useInterfaces) deviceType = ClassDB.className(cls);
     else if (dev.interfaces.length > 0)
         deviceType = deviceTypeFromInterfaces(dev.interfaces);
 
     const subtitle = [vendorName, deviceType].filter(Boolean).join(' · ');
 
-    const bullets = [speedLabel(dev.speed)];
-    if (dev.maxPowerMA > 0) bullets.push(`Power: ${powerLabel(dev.maxPowerMA)}`);
-    if (dev.version) bullets.push(`USB ${dev.version}`);
+    const baseHeadline = dev.product || vidPid(dev.vendorId, dev.productId);
+    const emoji = typeEmoji(dev.isHub, deviceType);
+    const headline = emoji ? `${emoji} ${baseHeadline}` : baseHeadline;
+
+    // One condensed specs row: "USB 2.10 · 480 Mbps · 500 mA". Empty parts
+    // omitted; speed always present even at 0 ("Unknown speed") since the
+    // bullet would otherwise dangle as "USB 2.10 · ".
+    const specs = [];
+    if (dev.version) specs.push(`USB ${dev.version}`);
+    specs.push(speedLabel(dev.speed));
+    if (dev.maxPowerMA > 0) specs.push(powerLabel(dev.maxPowerMA));
+    const bullets = [specs.join(' · ')];
+
     if (dev.serial) bullets.push(`Serial: ${dev.serial}`);
-    if (dev.removable === 'removable') bullets.push('Removable');
-    else if (dev.removable === 'fixed') bullets.push('Built-in');
+    if (dev.removable === 'removable') bullets.push('🔄 Removable');
+    else if (dev.removable === 'fixed') bullets.push('🔩 Built-in');
 
     const drivers = [...new Set(
         dev.interfaces.map(i => i.driver).filter(Boolean))];
-    if (drivers.length > 0) bullets.push(`Drivers: ${drivers.join(', ')}`);
+    if (drivers.length > 0) bullets.push(`⚙ ${drivers.join(', ')}`);
 
-    bullets.push(`VID:PID ${vidPid(dev.vendorId, dev.productId)}`);
+    // VID:PID stays in Details unconditionally; on the main view we only show
+    // it when the subtitle didn't decode a vendor name (so the user has *some*
+    // identifier to google with).
+    if (!vendorName)
+        bullets.push(`VID:PID ${vidPid(dev.vendorId, dev.productId)}`);
 
     return {
         category: dev.isHub ? 'hub' : 'usb',
-        headline: dev.product || vidPid(dev.vendorId, dev.productId),
+        headline,
         subtitle,
         icon: pickIcon(dev.isHub, deviceType),
         bullets,
