@@ -4,8 +4,42 @@
 import {enumerateUsbDevices} from './usb-device.js';
 import {enumerateTypecPorts} from './typec-port.js';
 import {enumeratePdPorts, PdProvenance, isPartnerProvenance} from './power-delivery.js';
-import {fromTypeCCable} from './cable-info.js';
+import {decodeIDHeader, decodeCableVDO, ProductType} from './pd-decoder.js';
+import {lookupVendor} from './vendor-db.js';
 import * as DeviceSummary from './device-summary.js';
+
+// USB-C cable e-marker info derived from typec cable identity VDOs.
+function cableInfo(cable) {
+    if (!cable) return null;
+    const idHeader = cable.identity?.vdos?.id_header;
+    // For cables, "Cable VDO" sits in product_type_vdo1 (PD VDO4) — see
+    // USB PD r3.x spec, Discover Identity response for SOP'.
+    const cableVdoRaw = cable.identity?.vdos?.product_type_vdo1;
+    const vendorId = cable.identity?.vendorId ?? 0;
+    const base = {
+        cableType: cable.type ?? '',
+        plugType: cable.plugType ?? '',
+        speed: null,
+        currentRating: null,
+        maxWatts: 0,
+        isActive: cable.type === 'active',
+        isPassive: cable.type === 'passive',
+        vendorId,
+        vendorName: vendorId ? lookupVendor(vendorId) : null,
+    };
+    if (idHeader === undefined || cableVdoRaw === undefined) return base;
+
+    const active = decodeIDHeader(idHeader).ufpProductType === ProductType.ActiveCable;
+    const cableVdo = decodeCableVDO(cableVdoRaw, active);
+    return {
+        ...base,
+        speed: cableVdo.speed,
+        currentRating: cableVdo.currentRating,
+        maxWatts: cableVdo.maxWatts,
+        isActive: cableVdo.isActive,
+        isPassive: !cableVdo.isActive,
+    };
+}
 
 // Return the PD port that represents the *charger's* offer for this typec
 // port. Never return a port-self entry: its source caps describe what the
@@ -47,7 +81,7 @@ export async function collectDevices() {
 
     for (const tc of typecPorts) {
         const pd = pairPdPort(tc, pdPorts, typecPorts.length);
-        const cable = tc.cable ? fromTypeCCable(tc.cable) : null;
+        const cable = cableInfo(tc.cable);
         summaries.push(DeviceSummary.fromTypeCPort(tc, pd, cable));
     }
 

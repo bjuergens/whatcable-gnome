@@ -6,7 +6,40 @@ import {currentDataRole, currentPowerRole, isConnected} from './typec-port.js';
 import {lookupVendor, formatHex16, formatVidPid} from './vendor-db.js';
 import * as ClassDB from './usb-class-db.js';
 import {decodeIDHeader, productTypeLabel, cableSpeedLabel, cableCurrentLabel} from './pd-decoder.js';
-import * as ChargingDiagnostic from './charging-diagnostic.js';
+
+// Identify charging bottlenecks (cable limit vs charger limit vs device).
+function chargingDiagnostic(pdPort, cable) {
+    if (!pdPort || pdPort.sourceCapabilities.length === 0) return null;
+    const chargerMaxW = Math.floor(pdPort.maxSourcePowerMW / 1000);
+    if (chargerMaxW <= 0) return null;
+
+    // activeW is the actually-negotiated PDO power. Until the kernel exposes
+    // the active PDO via /sys (see TODO in power-delivery.js#parsePdo), this
+    // is always 0 and the activeW branch below stays dormant.
+    const active = pdPort.sourceCapabilities.find(p => p.isActive);
+    const activeW = active ? Math.floor(active.powerMW / 1000) : 0;
+    const cableMaxW = cable?.maxWatts > 0 ? cable.maxWatts : 0;
+
+    if (cableMaxW > 0 && cableMaxW < chargerMaxW) {
+        return {
+            summary: 'Cable is limiting charging speed',
+            detail: `Cable rated for ${cableMaxW}W, but charger can deliver ${chargerMaxW}W`,
+            isWarning: true,
+        };
+    }
+    if (activeW > 0 && activeW < chargerMaxW * 0.8) {
+        return {
+            summary: `Charging at ${activeW}W`,
+            detail: `Charging at ${activeW}W (charger can do up to ${chargerMaxW}W)`,
+            isWarning: false,
+        };
+    }
+    return {
+        summary: `Charging well at ${activeW || chargerMaxW}W`,
+        detail: '',
+        isWarning: false,
+    };
+}
 
 const ICON_BY_DEVICE_TYPE = [
     ['Audio',         'audio-card'],
@@ -205,16 +238,8 @@ export function fromTypeCPort(port, pdPort, cable) {
         };
     }
 
-    if (pdPort) {
-        const diag = ChargingDiagnostic.evaluate(pdPort, cable);
-        if (diag) {
-            summary.charging = {
-                summary: diag.summary,
-                detail: diag.detail,
-                isWarning: diag.isWarning,
-            };
-        }
-    }
+    const diag = chargingDiagnostic(pdPort, cable);
+    if (diag) summary.charging = diag;
 
     return summary;
 }

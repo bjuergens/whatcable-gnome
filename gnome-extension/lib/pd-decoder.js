@@ -101,7 +101,7 @@ export function cableCurrentLabel(current) {
     return CABLE_CURRENT_LABELS[current] ?? 'Unknown';
 }
 
-export function cableCurrentMaxAmps(current) {
+function cableCurrentMaxAmps(current) {
     return CABLE_CURRENT_AMPS[current] ?? 0.9;
 }
 
