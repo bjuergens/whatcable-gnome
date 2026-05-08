@@ -192,16 +192,26 @@ export function fromTypeCPort(port, pdPort, cable) {
     summary.subtitle = partnerSubtitle(port.partner);
 
     if (port.pdRevision) summary.bullets.push(`PD ${port.pdRevision}`);
+    // Partner advertises its own PD revision; surface only when it diverges
+    // from the port's, since that's the case where it tells you something new.
+    if (port.partner?.pdRevision && port.partner.pdRevision !== port.pdRevision)
+        summary.bullets.push(`Partner PD ${port.partner.pdRevision}`);
+
+    const dataRole = currentDataRole(port);
+    if (dataRole === 'host') summary.bullets.push('🖥 Host');
+    else if (dataRole === 'device') summary.bullets.push('📱 Device');
 
     if (port.partner) {
         const idHeader = port.partner.identity?.vdos?.id_header;
         const hdr = idHeader !== undefined ? decodeIDHeader(idHeader) : null;
+        const vendorName = hdr ? lookupVendor(hdr.vendorId) : null;
+        if (vendorName) summary.bullets.push(`🏷 ${vendorName}`);
         summary.partner = {
             type: port.partner.type,
             productType: hdr?.ufpProductType ?? null,
             productTypeLabel: hdr ? productTypeLabel(hdr.ufpProductType) : null,
             vendorId: hdr ? hex16(hdr.vendorId) : null,
-            vendorName: hdr ? lookupVendor(hdr.vendorId) : null,
+            vendorName,
             pdRevision: port.partner.pdRevision || null,
         };
     }
@@ -229,8 +239,12 @@ export function fromTypeCPort(port, pdPort, cable) {
         // surfaces it, at which point this becomes "⚡ <active>/<max> W".
         const active = pdPort.sourceCapabilities.find(p => p.isActive);
         const activeW = active ? Math.floor(active.powerMW / 1000) : maxW;
+        // Power-direction arrow: ← when this port is sinking (charging), →
+        // when sourcing (powering a peripheral). Empty when role is unknown.
+        const powerRole = currentPowerRole(port);
+        const arrow = powerRole === 'sink' ? '←' : powerRole === 'source' ? '→' : '';
         if (maxW > 0)
-            summary.headline = `${summary.headline} — ⚡ ${activeW}/${maxW} W`;
+            summary.headline = `${summary.headline} — ⚡ ${arrow}${activeW}/${maxW} W`;
         if (pdPort.version && pdPort.revision !== port.pdRevision)
             summary.bullets.push(`PD spec version: ${pdPort.version}`);
 
