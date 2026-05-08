@@ -294,8 +294,21 @@ class WhatCableIndicator extends PanelMenu.Button {
             return;
         this._lastSignature = signature;
 
+        // Panel badge: current charging wattage + count of external (non-
+        // built-in) USB devices. Both pulled from the unfiltered device list
+        // so the badge reflects reality rather than what the popup chose to
+        // hide. "65W·3" combined; either part omitted when its value is zero.
+        const sinkingW = devices
+            .filter(d => d.category === 'typec' && d.typec?.powerRole === 'sink')
+            .reduce((m, d) => m + Math.floor((d.powerDelivery?.maxPowerMW ?? 0) / 1000), 0);
+        const externalCount = devices.filter(d =>
+            d.category !== 'typec' && d.usb?.removable !== 'fixed').length;
+        const parts = [];
+        if (sinkingW > 0) parts.push(`${sinkingW}W`);
+        if (externalCount > 0) parts.push(String(externalCount));
+        this._countLabel.text = parts.length > 0 ? ` ${parts.join('·')}` : '';
+
         const count = visible.length;
-        this._countLabel.text = count > 0 ? ` ${count}` : '';
         // Show the status row only on empty: with devices listed, "N USB
         // device(s)" duplicates what the user can already count.
         this._statusItem.label.text = 'No USB devices found';
