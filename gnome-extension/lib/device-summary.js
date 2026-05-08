@@ -57,11 +57,8 @@ function chargingDiagnostic(pdPort, cable) {
             isWarning: false,
         };
     }
-    return {
-        summary: `Charging well at ${activeW || chargerMaxW}W`,
-        detail: '',
-        isWarning: false,
-    };
+    // Healthy charging is shown in the headline (⚡ N/M W); no extra row.
+    return null;
 }
 
 const ICON_BY_DEVICE_TYPE = [
@@ -155,15 +152,17 @@ function partnerSubtitle(partner) {
     return vendorLabel ? `${vendorLabel} — ${productLabel}` : productLabel;
 }
 
-function cableBullets(cable) {
-    const bullets = [];
-    if (cable.speed) bullets.push(`Cable speed: ${cableSpeedLabel(cable.speed)}`);
-    if (cable.currentRating) bullets.push(`Cable current: ${cableCurrentLabel(cable.currentRating)}`);
-    if (cable.maxWatts > 0) bullets.push(`Cable max power: ${cable.maxWatts}W`);
-    if (cable.cableType === 'active') bullets.push('Active cable');
-    else if (cable.cableType === 'passive') bullets.push('Passive cable');
-    if (cable.vendorName) bullets.push(`Cable vendor: ${cable.vendorName}`);
-    return bullets;
+// Single condensed cable line: "🔌 Passive · 5 Gbps · 3 A · 60W · Vendor".
+// Empty parts are omitted; type is always present (passive/active/unknown).
+function cableBullet(cable) {
+    const parts = [];
+    if (cable.cableType === 'active') parts.push('Active');
+    else if (cable.cableType === 'passive') parts.push('Passive');
+    if (cable.speed) parts.push(cableSpeedLabel(cable.speed));
+    if (cable.currentRating) parts.push(cableCurrentLabel(cable.currentRating));
+    if (cable.maxWatts > 0) parts.push(`${cable.maxWatts}W`);
+    if (cable.vendorName) parts.push(cable.vendorName);
+    return parts.length > 0 ? `🔌 ${parts.join(' · ')}` : null;
 }
 
 export function fromTypeCPort(port, pdPort, cable) {
@@ -179,6 +178,8 @@ export function fromTypeCPort(port, pdPort, cable) {
             powerRole: currentPowerRole(port),
             portType: port.portType,
             powerOpMode: port.powerOpMode,
+            orientation: port.orientation && port.orientation !== 'unknown'
+                ? port.orientation : null,
             connected: isConnected(port),
         },
     };
@@ -190,10 +191,7 @@ export function fromTypeCPort(port, pdPort, cable) {
 
     summary.subtitle = partnerSubtitle(port.partner);
 
-    if (port.powerOpMode) summary.bullets.push(`Power mode: ${port.powerOpMode}`);
-    if (port.pdRevision) summary.bullets.push(`PD revision: ${port.pdRevision}`);
-    if (port.orientation && port.orientation !== 'unknown')
-        summary.bullets.push(`Plug orientation: ${port.orientation}`);
+    if (port.pdRevision) summary.bullets.push(`PD ${port.pdRevision}`);
 
     if (port.partner) {
         const idHeader = port.partner.identity?.vdos?.id_header;
@@ -209,7 +207,8 @@ export function fromTypeCPort(port, pdPort, cable) {
     }
 
     if (cable) {
-        summary.bullets.push(...cableBullets(cable));
+        const line = cableBullet(cable);
+        if (line) summary.bullets.push(line);
         summary.cable = {
             type: cable.cableType,
             speed: cable.speed,
@@ -225,7 +224,13 @@ export function fromTypeCPort(port, pdPort, cable) {
 
     if (pdPort?.sourceCapabilities.length > 0) {
         const maxW = Math.floor(pdPort.maxSourcePowerMW / 1000);
-        summary.bullets.push(`Charger max: ${maxW}W`);
+        // Active PDO is not exposed by /sys today (see power-delivery.js); fall
+        // back to maxW/maxW so the headline reads "⚡ 65/65 W" until the kernel
+        // surfaces it, at which point this becomes "⚡ <active>/<max> W".
+        const active = pdPort.sourceCapabilities.find(p => p.isActive);
+        const activeW = active ? Math.floor(active.powerMW / 1000) : maxW;
+        if (maxW > 0)
+            summary.headline = `${summary.headline} — ⚡ ${activeW}/${maxW} W`;
         if (pdPort.version && pdPort.revision !== port.pdRevision)
             summary.bullets.push(`PD spec version: ${pdPort.version}`);
 
