@@ -4,6 +4,18 @@ import {sysfsToJson, asString, asInt, symlinkTarget} from './sysfsToJson.js';
 
 const PD_PATH = '/sys/class/usb_power_delivery';
 
+// Files we read out of a PD port directory (the port itself + every PDO
+// subdir, both source and sink shapes). Exported so typec-port.js can include
+// them when scanning partners that expose PDOs inline (UCSI).
+export const PD_FILES = new Set([
+    'revision', 'version',
+    'voltage', 'maximum_current', 'operational_current', 'peak_current',
+    'maximum_voltage', 'minimum_voltage',
+    'maximum_power', 'operational_power',
+    'pps_power_limited',
+    'maximum_current_15V_to_20V', 'maximum_current_9V_to_15V',
+]);
+
 // Where a PD port's data came from. The kernel exposes "what *this* port can
 // source/sink" and "what the *partner* advertised" through the same sysfs
 // shape, and confusing the two means displaying the local port's mandatory
@@ -200,7 +212,7 @@ function classifyClassEntry(entry) {
 }
 
 export async function enumeratePdPorts() {
-    const tree = await sysfsToJson(PD_PATH);
+    const tree = await sysfsToJson(PD_PATH, {files: PD_FILES});
     const ports = [];
     for (const entry of tree) {
         const port = readPort(entry, entry._name, classifyClassEntry(entry));

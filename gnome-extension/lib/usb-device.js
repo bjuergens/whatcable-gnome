@@ -6,6 +6,16 @@ import {formatVidPid} from './vendor-db.js';
 const USB_DEVICES_PATH = '/sys/bus/usb/devices';
 const IFACE_KEY_RE = /:/;
 
+const USB_FILES = new Set([
+    // device attrs
+    'idVendor', 'idProduct', 'manufacturer', 'product', 'serial', 'version',
+    'removable', 'speed', 'bMaxPower', 'busnum', 'devnum',
+    'rx_lanes', 'tx_lanes', 'bNumConfigurations',
+    'bDeviceClass', 'bDeviceSubClass', 'bDeviceProtocol', 'bNumInterfaces',
+    // interface attrs
+    'bInterfaceClass', 'bInterfaceSubClass', 'bInterfaceProtocol',
+]);
+
 const SPEED_LABELS = [
     [20000, 'USB4 20 Gbps'],
     [10000, 'SuperSpeed+ 10 Gbps'],
@@ -102,7 +112,7 @@ export function devicePowerLabel(dev) {
 }
 
 export async function enumerateUsbDevices() {
-    const tree = await sysfsToJson(USB_DEVICES_PATH);
+    const tree = await sysfsToJson(USB_DEVICES_PATH, {files: USB_FILES});
     const devices = [];
     for (const entry of tree) {
         const dev = readDevice(entry);

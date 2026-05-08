@@ -1,7 +1,22 @@
 // Enumerate /sys/class/typec/.
 
 import {sysfsToJson, asString, asHex, symlinkTarget} from './sysfsToJson.js';
-import {readPort as readPdPort, PdProvenance} from './power-delivery.js';
+import {readPort as readPdPort, PdProvenance, PD_FILES} from './power-delivery.js';
+
+const TYPEC_PORT_FILES = new Set([
+    // port attrs
+    'data_role', 'power_role', 'port_type', 'power_operation_mode',
+    'orientation', 'usb_power_delivery_revision', 'usb_typec_revision',
+    // partner / cable attrs
+    'type', 'plug_type', 'supports_usb_power_delivery',
+    // identity (named VDO files; vdo* pattern handled in the predicate)
+    'id_header', 'cert_stat', 'product',
+    'product_type_vdo1', 'product_type_vdo2', 'product_type_vdo3',
+]);
+
+function typecAllow(name) {
+    return TYPEC_PORT_FILES.has(name) || PD_FILES.has(name) || name.startsWith('vdo');
+}
 
 const TYPEC_PATH = '/sys/class/typec';
 const PARTNER_PD_RE = /^pd\d+$/;
@@ -122,7 +137,7 @@ export function currentPowerRole(port) {
 }
 
 export async function enumerateTypecPorts() {
-    const tree = await sysfsToJson(TYPEC_PATH);
+    const tree = await sysfsToJson(TYPEC_PATH, {files: typecAllow});
     // The class root mixes portN, portN-partner, portN-cable (and plugN) as
     // sibling entries. Index by name so each port can pick up its companions.
     const byName = new Map(tree.map(e => [e._name, e]));

@@ -66,7 +66,7 @@ function _symlinkBasename(info) {
     return target ? GLib.path_get_basename(target) : '';
 }
 
-async function _dirToObject(path, depth) {
+async function _dirToObject(path, depth, allowFile) {
     if (depth > MAX_DEPTH) return { _error: 'max_depth_exceeded', _path: path };
 
     const obj = {};
@@ -78,8 +78,9 @@ async function _dirToObject(path, depth) {
         if (isSymlink) {
             obj[name] = { _symlink: _symlinkBasename(info) };
         } else if (type === Gio.FileType.DIRECTORY) {
-            obj[name] = await _dirToObject(`${path}/${name}`, depth + 1);
+            obj[name] = await _dirToObject(`${path}/${name}`, depth + 1, allowFile);
         } else if (type === Gio.FileType.REGULAR) {
+            if (!allowFile(name)) continue;
             obj[name] = await _readFile(`${path}/${name}`);
         }
         // skip sockets, fifos, etc.
@@ -89,10 +90,25 @@ async function _dirToObject(path, depth) {
 
 /**
  * Map a sysfs directory to a JSON-serialisable array of entries.
+ *
+ * Sysfs files vastly outnumber the ones any caller needs, and `load_contents`
+ * is the dominant cost (one open/read/close per file). Pass `files` to bound
+ * that work — a Set of filenames or a predicate `(name) => boolean`. Files
+ * not allowed are simply omitted from the output. Directories are always
+ * traversed (enumerate is cheap) and symlinks always become `{_symlink}`
+ * leaves.
+ *
+ * Without `files`, every regular file is read.
+ *
  * @param {string} rootPath  e.g. '/sys/class/typec'
+ * @param {{files?: Set<string>|((name: string) => boolean)}} [options]
  * @returns {Promise<Array>}
  */
-export async function sysfsToJson(rootPath) {
+export async function sysfsToJson(rootPath, {files} = {}) {
+    const allowFile = files instanceof Set
+        ? (name => files.has(name))
+        : (typeof files === 'function' ? files : (() => true));
+
     const result = [];
     for await (const info of _iterChildren(rootPath)) {
         const name = info.get_name();
@@ -101,10 +117,8 @@ export async function sysfsToJson(rootPath) {
 
         if (type !== Gio.FileType.DIRECTORY && !isSymlink) continue;
 
-        // resolve_relative_path is purely lexical; opening the resulting path
-        // with GIO transparently follows the symlink to the real device dir.
         const childPath = `${rootPath}/${name}`;
-        const entry = { _name: name, ...(await _dirToObject(childPath, 0)) };
+        const entry = { _name: name, ...(await _dirToObject(childPath, 0, allowFile)) };
         if (isSymlink) entry._symlinkTarget = _symlinkBasename(info);
         result.push(entry);
     }
