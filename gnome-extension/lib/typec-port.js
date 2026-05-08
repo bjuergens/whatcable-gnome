@@ -67,8 +67,13 @@ async function readPort(path, name) {
     const partner = Sysfs.pathExists(partnerPath)
         ? await Promise.all([
             Sysfs.readAttribute(`${partnerPath}/type`),
+            Sysfs.readAttribute(`${partnerPath}/usb_power_delivery_revision`),
             readIdentity(partnerPath),
-        ]).then(([type, identity]) => ({type: type ?? '', identity}))
+        ]).then(([type, pdRevision, identity]) => ({
+            type: type ?? '',
+            pdRevision: pdRevision ?? '',
+            identity,
+        }))
         : null;
 
     const cablePath = `${path}-cable`;
@@ -76,10 +81,12 @@ async function readPort(path, name) {
         ? await Promise.all([
             Sysfs.readAttribute(`${cablePath}/type`),
             Sysfs.readAttribute(`${cablePath}/plug_type`),
+            Sysfs.readAttribute(`${cablePath}/usb_power_delivery_revision`),
             readIdentity(cablePath),
-        ]).then(([type, plugType, identity]) => ({
+        ]).then(([type, plugType, pdRevision, identity]) => ({
             type: type ?? '',
             plugType: plugType ?? '',
+            pdRevision: pdRevision ?? '',
             identity,
         }))
         : null;
