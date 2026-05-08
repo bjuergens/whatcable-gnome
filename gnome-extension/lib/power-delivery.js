@@ -146,10 +146,15 @@ async function parsePdo(pdoPath, entryName, role) {
         index, type,
         typeLabel: pdoTypeLabel(type),
         ...fields,
-        // TODO: detect the active PDO. The kernel doesn't expose this directly
-        // via /sys/class/usb_power_delivery/; it lives in the negotiated PD
-        // request DO and is only reachable through driver-specific debugfs or
-        // PD trace events. Until then, every PDO renders as inactive.
+        // The negotiated PDO index is not exposed by /sys/class/usb_power_delivery
+        // — verified against Documentation/ABI/testing/sysfs-class-usb_power_delivery
+        // and drivers/usb/typec/pd.c. The PD Request Data Object lives inside
+        // the controller and is only reachable via driver-specific debugfs
+        // (e.g. /sys/kernel/debug/tcpm/) or PD trace events.
+        // /sys/class/typec/portN/power_operation_mode signals *whether* PD is
+        // in use ("usb_power_delivery") but not which PDO; surfaced via
+        // typec.powerOpMode rather than per-PDO. Until something better lands
+        // upstream, every PDO renders as inactive.
         isActive: false,
     };
 }

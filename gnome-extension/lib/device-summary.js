@@ -143,11 +143,15 @@ export function fromTypeCPort(port, pdPort, cable) {
     }
     if (port.powerOpMode) summary.bullets.push(`Power mode: ${port.powerOpMode}`);
     if (port.pdRevision) summary.bullets.push(`PD revision: ${port.pdRevision}`);
+    if (port.partner?.pdRevision && port.partner.pdRevision !== port.pdRevision)
+        summary.bullets.push(`Partner advertises PD ${port.partner.pdRevision}`);
     if (port.orientation && port.orientation !== 'unknown')
         summary.bullets.push(`Plug orientation: ${port.orientation}`);
 
     if (cable) {
         summary.bullets.push(...cableBullets(cable));
+        if (port.cable?.pdRevision)
+            summary.bullets.push(`Cable PD revision: ${port.cable.pdRevision}`);
         summary.cable = {
             type: cable.cableType,
             speed: cable.speed ? cableSpeedLabel(cable.speed) : null,
@@ -155,26 +159,36 @@ export function fromTypeCPort(port, pdPort, cable) {
             maxWatts: cable.maxWatts,
             vendorId: formatHex16(cable.vendorId),
             vendorName: cable.vendorName,
+            pdRevision: port.cable?.pdRevision ?? null,
         };
     }
 
     if (pdPort?.sourceCapabilities.length > 0) {
         const maxW = Math.floor(pdPort.maxSourcePowerMW / 1000);
         summary.bullets.push(`Charger max: ${maxW}W`);
+        if (pdPort.version)
+            summary.bullets.push(`PD spec: rev ${pdPort.revision} v${pdPort.version}`);
 
+        // type/typeKey: `type` keeps the human label (back-compat with
+        // earlier validateDevice consumers); `typeKey` carries the canonical
+        // enum used by render-side branching.
         summary.powerDelivery = {
             sourceCapabilities: pdPort.sourceCapabilities.map(p => ({
-                type: p.type,
-                typeLabel: p.typeLabel,
+                type: p.typeLabel,
+                typeKey: p.type,
                 voltageMV: p.voltageMV,
                 minVoltageMV: p.minVoltageMV,
                 currentMA: p.currentMA,
                 currentMA9to15: p.currentMA9to15,
                 currentMA15to20: p.currentMA15to20,
+                peakCurrentMA: p.peakCurrentMA,
+                ppsPowerLimited: p.ppsPowerLimited,
                 powerMW: p.powerMW,
                 active: p.isActive,
             })),
             maxPowerMW: pdPort.maxSourcePowerMW,
+            revision: pdPort.revision,
+            version: pdPort.version,
         };
     }
 

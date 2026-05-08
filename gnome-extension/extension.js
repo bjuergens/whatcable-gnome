@@ -22,18 +22,20 @@ function formatMilli(m) {
 // Render one source-capability PDO row. Fixed PDOs read as a single voltage;
 // Variable / PPS / Battery / AVS span a range, and AVS additionally splits
 // current across the 9-15 V and 15-20 V segments — show both when present.
+// `pdo.type` is the human label ("Fixed", "PPS"); `pdo.typeKey` is the
+// canonical enum used here for branching.
 function formatPdoRow(pdo) {
     const W = Math.round(pdo.powerMW / 1000);
     const Vmax = formatMilli(pdo.voltageMV);
     const A = formatMilli(pdo.currentMA);
     const hasMin = typeof pdo.minVoltageMV === 'number' && pdo.minVoltageMV > 0;
     const Vmin = hasMin ? formatMilli(pdo.minVoltageMV) : null;
-    const label = pdo.typeLabel ? `${pdo.typeLabel}: ` : '';
+    const label = pdo.type ? `${pdo.type}: ` : '';
 
     let body;
-    if (pdo.type === 'battery') {
+    if (pdo.typeKey === 'battery') {
         body = hasMin ? `${Vmin}–${Vmax}V — ${W}W` : `${Vmax}V — ${W}W`;
-    } else if (pdo.type === 'avs' &&
+    } else if (pdo.typeKey === 'avs' &&
                typeof pdo.currentMA9to15 === 'number' && pdo.currentMA9to15 > 0 &&
                typeof pdo.currentMA15to20 === 'number' && pdo.currentMA15to20 > 0) {
         const a9 = formatMilli(pdo.currentMA9to15);
@@ -44,7 +46,15 @@ function formatPdoRow(pdo) {
     } else {
         body = `${Vmax}V @ ${A}A — ${W}W`;
     }
-    return `${label}${body}`;
+
+    const suffixes = [];
+    if (typeof pdo.peakCurrentMA === 'number' && pdo.peakCurrentMA > pdo.currentMA)
+        suffixes.push(`peak ${formatMilli(pdo.peakCurrentMA)}A`);
+    if (pdo.ppsPowerLimited) suffixes.push('power-limited');
+
+    return suffixes.length > 0
+        ? `${label}${body} · ${suffixes.join(', ')}`
+        : `${label}${body}`;
 }
 
 // Permissive shape check for one device entry produced by collectDevices().
@@ -88,12 +98,28 @@ function validateDevice(d) {
 
     if (d.powerDelivery && typeof d.powerDelivery === 'object' &&
         Array.isArray(d.powerDelivery.sourceCapabilities)) {
-        const pdos = d.powerDelivery.sourceCapabilities.filter(p =>
-            p && typeof p === 'object' &&
-            typeof p.voltageMV === 'number' &&
-            typeof p.currentMA === 'number' &&
-            typeof p.powerMW === 'number' &&
-            typeof p.active === 'boolean');
+        const pdos = [];
+        for (const p of d.powerDelivery.sourceCapabilities) {
+            if (!p || typeof p !== 'object' || Array.isArray(p)) continue;
+            if (typeof p.voltageMV !== 'number') continue;
+            if (typeof p.currentMA !== 'number') continue;
+            if (typeof p.powerMW !== 'number') continue;
+            if (typeof p.active !== 'boolean') continue;
+            const pdo = {
+                voltageMV: p.voltageMV,
+                currentMA: p.currentMA,
+                powerMW: p.powerMW,
+                active: p.active,
+            };
+            if (typeof p.type === 'string') pdo.type = p.type;
+            if (typeof p.typeKey === 'string') pdo.typeKey = p.typeKey;
+            if (typeof p.minVoltageMV === 'number') pdo.minVoltageMV = p.minVoltageMV;
+            if (typeof p.currentMA9to15 === 'number') pdo.currentMA9to15 = p.currentMA9to15;
+            if (typeof p.currentMA15to20 === 'number') pdo.currentMA15to20 = p.currentMA15to20;
+            if (typeof p.peakCurrentMA === 'number') pdo.peakCurrentMA = p.peakCurrentMA;
+            if (typeof p.ppsPowerLimited === 'boolean') pdo.ppsPowerLimited = p.ppsPowerLimited;
+            pdos.push(pdo);
+        }
         if (pdos.length > 0)
             out.powerDelivery = {sourceCapabilities: pdos};
     }
