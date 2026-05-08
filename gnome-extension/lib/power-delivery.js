@@ -173,7 +173,7 @@ async function parseCapabilities(capsPath, role) {
     return pdos.sort((a, b) => a.index - b.index);
 }
 
-async function readPort(path, name) {
+export async function readPort(path, name) {
     const [revision, version, sourceCapabilities, sinkCapabilities] = await Promise.all([
         Sysfs.readAttribute(`${path}/revision`),
         Sysfs.readAttribute(`${path}/version`),

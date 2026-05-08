@@ -17,6 +17,13 @@ function pairPdPort(tcPort, pdPorts, typecCount) {
     // Fallback used when the kernel didn't expose the symlink (older drivers)
     // and the topology is unambiguous.
     if (pdPorts.length === 1 && typecCount === 1) return pdPorts[0];
+    // UCSI fallback: /sys/class/usb_power_delivery is empty, but the partner
+    // exposes its advertised PDOs under port-partner/pdN/. Prefer the entry
+    // with source capabilities (the charger's offer).
+    const partnerPds = tcPort.partner?.pdPorts ?? [];
+    const withSource = partnerPds.find(p => p.sourceCapabilities.length > 0);
+    if (withSource) return withSource;
+    if (partnerPds.length > 0) return partnerPds[0];
     return null;
 }
 
