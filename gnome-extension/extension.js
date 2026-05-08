@@ -307,41 +307,27 @@ class WhatCableIndicator extends PanelMenu.Button {
         // name) without splitting the label into multiple actors.
         if (dev.headlineMarkup)
             item.label.clutter_text.set_use_markup(true);
-        const headlineClasses = ['whatcable-device-headline'];
-        if (dev.category === 'typec') headlineClasses.push('whatcable-typec-headline');
-        if (dev.headlineClass) headlineClasses.push(dev.headlineClass);
-        item.label.style_class = headlineClasses.join(' ');
 
         if (dev.subtitle) {
             const sub = new PopupMenu.PopupMenuItem(dev.subtitle, {reactive: false});
-            sub.label.style_class = 'whatcable-subtitle';
             item.menu.addMenuItem(sub);
         }
 
         for (const bullet of dev.bullets ?? []) {
             // Bullets can be plain strings or {text, class} for one-off
-            // styling (e.g. cable-limited cable bullet rendered amber). The
-            // base whatcable-bullet class always applies — overrides only
-            // contribute color, and the indent/border come from the base.
+            // styling. With the no-custom-CSS approach we ignore any class
+            // hint and just render the text.
             const text = typeof bullet === 'string' ? bullet : bullet.text;
-            const extra = typeof bullet === 'string' ? null : bullet.class;
             const b = new PopupMenu.PopupMenuItem(`• ${text}`, {reactive: false});
-            b.label.style_class = extra
-                ? `whatcable-bullet ${extra}`
-                : 'whatcable-bullet';
             item.menu.addMenuItem(b);
         }
 
         if (dev.charging?.summary) {
             const prefix = dev.charging.isWarning ? '⚠ ' : '✓ ';
             const c = new PopupMenu.PopupMenuItem(prefix + dev.charging.summary, {reactive: false});
-            c.label.style_class = dev.charging.isWarning
-                ? 'whatcable-warning'
-                : 'whatcable-ok';
             item.menu.addMenuItem(c);
             if (dev.charging.detail) {
                 const d = new PopupMenu.PopupMenuItem(dev.charging.detail, {reactive: false});
-                d.label.style_class = 'whatcable-detail';
                 item.menu.addMenuItem(d);
             }
         }
@@ -364,7 +350,6 @@ class WhatCableIndicator extends PanelMenu.Button {
                     : '';
                 const p = new PopupMenu.PopupMenuItem(
                     `• ${formatPdoRow(pdo)}${marker}`, {reactive: false});
-                p.label.style_class = pdo.active ? 'whatcable-ok' : 'whatcable-bullet';
                 item.menu.addMenuItem(p);
             });
         }
@@ -395,11 +380,9 @@ class WhatCableIndicator extends PanelMenu.Button {
         const addLines = (header, lines) => {
             if (lines.length === 0) return;
             const h = new PopupMenu.PopupMenuItem(header, {reactive: false});
-            h.label.style_class = 'whatcable-subtitle';
             parent.menu.addMenuItem(h);
             for (const line of lines) {
                 const m = new PopupMenu.PopupMenuItem(`  ${line}`, {reactive: false});
-                m.label.style_class = 'whatcable-bullet';
                 parent.menu.addMenuItem(m);
             }
         };
