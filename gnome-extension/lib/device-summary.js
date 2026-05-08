@@ -80,7 +80,8 @@ export function fromUsbDevice(dev) {
             device: dev.devNum,
             isHub: dev.isHub,
             interfaces: dev.interfaces.map(i => ({
-                class: ClassDB.className(i.classCode),
+                classCode: i.classCode,
+                classLabel: ClassDB.className(i.classCode),
                 driver: i.driver,
             })),
         },
@@ -143,34 +144,64 @@ export function fromTypeCPort(port, pdPort, cable) {
     }
     if (port.powerOpMode) summary.bullets.push(`Power mode: ${port.powerOpMode}`);
     if (port.pdRevision) summary.bullets.push(`PD revision: ${port.pdRevision}`);
+    if (port.partner?.pdRevision && port.partner.pdRevision !== port.pdRevision)
+        summary.bullets.push(`Partner PD revision: ${port.partner.pdRevision}`);
     if (port.orientation && port.orientation !== 'unknown')
         summary.bullets.push(`Plug orientation: ${port.orientation}`);
 
+    if (port.partner) {
+        const idHeader = port.partner.identity?.vdos?.id_header;
+        const hdr = idHeader !== undefined ? decodeIDHeader(idHeader) : null;
+        summary.partner = {
+            type: port.partner.type,
+            productType: hdr?.ufpProductType ?? null,
+            productTypeLabel: hdr ? productTypeLabel(hdr.ufpProductType) : null,
+            vendorId: hdr ? formatHex16(hdr.vendorId) : null,
+            vendorName: hdr ? lookupVendor(hdr.vendorId) : null,
+            pdRevision: port.partner.pdRevision || null,
+        };
+    }
+
     if (cable) {
         summary.bullets.push(...cableBullets(cable));
+        if (port.cable?.pdRevision && port.cable.pdRevision !== port.pdRevision)
+            summary.bullets.push(`Cable PD revision: ${port.cable.pdRevision}`);
         summary.cable = {
             type: cable.cableType,
-            speed: cable.speed ? cableSpeedLabel(cable.speed) : null,
-            current: cable.currentRating ? cableCurrentLabel(cable.currentRating) : null,
+            speed: cable.speed,
+            speedLabel: cable.speed ? cableSpeedLabel(cable.speed) : null,
+            currentRating: cable.currentRating,
+            currentRatingLabel: cable.currentRating ? cableCurrentLabel(cable.currentRating) : null,
             maxWatts: cable.maxWatts,
             vendorId: formatHex16(cable.vendorId),
             vendorName: cable.vendorName,
+            pdRevision: port.cable?.pdRevision ?? null,
         };
     }
 
     if (pdPort?.sourceCapabilities.length > 0) {
         const maxW = Math.floor(pdPort.maxSourcePowerMW / 1000);
         summary.bullets.push(`Charger max: ${maxW}W`);
+        if (pdPort.version && pdPort.revision !== port.pdRevision)
+            summary.bullets.push(`PD spec version: ${pdPort.version}`);
 
         summary.powerDelivery = {
             sourceCapabilities: pdPort.sourceCapabilities.map(p => ({
-                type: p.typeLabel,
+                type: p.type,
+                typeLabel: p.typeLabel,
                 voltageMV: p.voltageMV,
+                minVoltageMV: p.minVoltageMV,
                 currentMA: p.currentMA,
+                currentMA9to15: p.currentMA9to15,
+                currentMA15to20: p.currentMA15to20,
+                peakCurrentMA: p.peakCurrentMA,
+                ppsPowerLimited: p.ppsPowerLimited,
                 powerMW: p.powerMW,
                 active: p.isActive,
             })),
             maxPowerMW: pdPort.maxSourcePowerMW,
+            revision: pdPort.revision,
+            version: pdPort.version,
         };
     }
 
