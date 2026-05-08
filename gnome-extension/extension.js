@@ -302,6 +302,16 @@ class WhatCableIndicator extends PanelMenu.Button {
 
     _buildDeviceItem(dev) {
         const item = new PopupMenu.PopupSubMenuMenuItem(dev.headline);
+        // Pango markup is opt-in per device. device-summary uses it to color
+        // pieces of the typec headline (charging-green wattage, warning-amber
+        // name) without splitting the label into multiple actors.
+        if (dev.headlineMarkup)
+            item.label.clutter_text.set_use_markup(true);
+        const headlineClasses = [];
+        if (dev.category === 'typec') headlineClasses.push('whatcable-typec-headline');
+        if (dev.headlineClass) headlineClasses.push(dev.headlineClass);
+        if (headlineClasses.length > 0)
+            item.label.style_class = headlineClasses.join(' ');
 
         if (dev.subtitle) {
             const sub = new PopupMenu.PopupMenuItem(dev.subtitle, {reactive: false});
@@ -310,8 +320,12 @@ class WhatCableIndicator extends PanelMenu.Button {
         }
 
         for (const bullet of dev.bullets ?? []) {
-            const b = new PopupMenu.PopupMenuItem(`• ${bullet}`, {reactive: false});
-            b.label.style_class = 'whatcable-bullet';
+            // Bullets can be plain strings or {text, class} for one-off
+            // styling (e.g. cable-limited cable bullet rendered amber).
+            const text = typeof bullet === 'string' ? bullet : bullet.text;
+            const cls = typeof bullet === 'string' ? 'whatcable-bullet' : bullet.class;
+            const b = new PopupMenu.PopupMenuItem(`• ${text}`, {reactive: false});
+            b.label.style_class = cls;
             item.menu.addMenuItem(b);
         }
 

@@ -5,6 +5,18 @@ import {lookupVendor} from './vendor-db.js';
 import * as ClassDB from './usb-class-db.js';
 import {decodeIDHeader, productTypeLabel, cableSpeedLabel, cableCurrentLabel} from './pd-decoder.js';
 
+// Pango spans used in headline/bullet markup. Mirrors stylesheet.css colors so
+// markup-coloring and class-coloring stay visually consistent.
+const COLOR_OK = '#26a269';      // matches .whatcable-ok
+const COLOR_WARN = '#e5a50a';    // matches .whatcable-warning
+const COLOR_SOURCE = '#9141ac';  // sourcing-violet, only used inline
+
+const escapeMarkup = s => String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+const span = (text, color) => `<span color="${color}">${escapeMarkup(text)}</span>`;
+
 const hex16 = id => `0x${id.toString(16).padStart(4, '0')}`;
 const vidPid = (v, p) => `${v.toString(16).padStart(4, '0')}:${p.toString(16).padStart(4, '0')}`;
 
@@ -203,9 +215,12 @@ function cableBullet(cable) {
 }
 
 export function fromTypeCPort(port, pdPort, cable) {
+    const portName = `USB-C Port ${port.portNumber}`;
     const summary = {
         category: 'typec',
-        headline: `USB-C Port ${port.portNumber}`,
+        headline: `🔌 ${portName}`,
+        headlineMarkup: false,
+        headlineClass: null,
         subtitle: '',
         icon: 'plug',
         bullets: [],
@@ -223,18 +238,24 @@ export function fromTypeCPort(port, pdPort, cable) {
 
     if (!isConnected(port)) {
         summary.subtitle = 'Nothing connected';
+        summary.headlineClass = 'whatcable-empty-port';
         return summary;
     }
 
     summary.subtitle = partnerSubtitle(port.partner);
 
-    // Combine PD revision and data role into one row, e.g. "PD 2.0 · 🖥 Host".
+    // Combine PD revision, data role, and power direction into one row, e.g.
+    // "PD 2.0 · 📱 Device · 🔋 Charging".
     const dataRole = currentDataRole(port);
+    const powerRole = currentPowerRole(port);
     const roleLabel = dataRole === 'host' ? '🖥 Host'
         : dataRole === 'device' ? '📱 Device' : null;
+    const directionLabel = powerRole === 'sink' ? '🔋 Charging'
+        : powerRole === 'source' ? '⚡ Powering' : null;
     const pdAndRole = [
         port.pdRevision ? `PD ${port.pdRevision}` : null,
         roleLabel,
+        directionLabel,
     ].filter(Boolean).join(' · ');
     if (pdAndRole) summary.bullets.push(pdAndRole);
 
@@ -259,9 +280,13 @@ export function fromTypeCPort(port, pdPort, cable) {
         };
     }
 
+    let cableBulletIndex = -1;
     if (cable) {
         const line = cableBullet(cable);
-        if (line) summary.bullets.push(line);
+        if (line) {
+            cableBulletIndex = summary.bullets.length;
+            summary.bullets.push(line);
+        }
         summary.cable = {
             type: cable.cableType,
             speed: cable.speed,
@@ -275,6 +300,7 @@ export function fromTypeCPort(port, pdPort, cable) {
         };
     }
 
+    let wattsText = '';
     if (pdPort?.sourceCapabilities.length > 0) {
         const maxW = Math.floor(pdPort.maxSourcePowerMW / 1000);
         // Active PDO is not exposed by /sys today (see power-delivery.js); fall
@@ -282,12 +308,7 @@ export function fromTypeCPort(port, pdPort, cable) {
         // surfaces it, at which point this becomes "⚡ <active>/<max> W".
         const active = pdPort.sourceCapabilities.find(p => p.isActive);
         const activeW = active ? Math.floor(active.powerMW / 1000) : maxW;
-        // Power-direction arrow: ← when this port is sinking (charging), →
-        // when sourcing (powering a peripheral). Empty when role is unknown.
-        const powerRole = currentPowerRole(port);
-        const arrow = powerRole === 'sink' ? '←' : powerRole === 'source' ? '→' : '';
-        if (maxW > 0)
-            summary.headline = `${summary.headline} — ⚡ ${arrow}${activeW}/${maxW} W`;
+        if (maxW > 0) wattsText = `${activeW}/${maxW} W`;
         if (pdPort.version && pdPort.revision !== port.pdRevision)
             summary.bullets.push(`PD spec version: ${pdPort.version}`);
 
@@ -313,6 +334,34 @@ export function fromTypeCPort(port, pdPort, cable) {
 
     const diag = chargingDiagnostic(pdPort, cable);
     if (diag) summary.charging = diag;
+
+    // Headline assembly. Three independent decorations:
+    //   - Prefix:  ⚠ replaces 🔌 when there's a charging warning (q2).
+    //   - Name:    amber when there's a charging warning (i).
+    //   - Wattage: green when sinking (h), violet when sourcing (l).
+    // Empty/disconnected ports already returned above with whatcable-empty-port.
+    const isWarning = !!diag?.isWarning;
+    const prefix = isWarning ? '⚠' : '🔌';
+    const namePart = isWarning ? span(portName, COLOR_WARN) : escapeMarkup(portName);
+
+    let wattsPart = '';
+    if (wattsText) {
+        const color = powerRole === 'sink' ? COLOR_OK
+            : powerRole === 'source' ? COLOR_SOURCE : null;
+        const watts = color ? span(wattsText, color) : escapeMarkup(wattsText);
+        wattsPart = ` — ⚡ ${watts}`;
+    }
+    summary.headline = `${prefix} ${namePart}${wattsPart}`;
+    summary.headlineMarkup = true;
+
+    // Cable-limited diagnostic colors the cable bullet amber too (m), so the
+    // user sees *which* link is the problem alongside the title-level cue.
+    if (isWarning && cableBulletIndex >= 0) {
+        summary.bullets[cableBulletIndex] = {
+            text: summary.bullets[cableBulletIndex],
+            class: 'whatcable-warning',
+        };
+    }
 
     return summary;
 }

@@ -10,6 +10,15 @@
 .whatcable-subtitle {
     opacity: 0.75;
     font-size: 0.95em;
+    font-style: italic;
+}
+
+.whatcable-typec-headline {
+    font-feature-settings: "tnum";
+}
+
+.whatcable-empty-port {
+    opacity: 0.55;
 }
 
 .whatcable-bullet {
