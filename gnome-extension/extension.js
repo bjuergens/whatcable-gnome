@@ -22,20 +22,20 @@ function formatMilli(m) {
 // Render one source-capability PDO row. Fixed PDOs read as a single voltage;
 // Variable / PPS / Battery / AVS span a range, and AVS additionally splits
 // current across the 9-15 V and 15-20 V segments — show both when present.
-// `pdo.type` is the human label ("Fixed", "PPS"); `pdo.typeKey` is the
-// canonical enum used here for branching.
+// `pdo.type` is the kernel enum ("fixed", "pps", …); `pdo.typeLabel` is the
+// human label used as the row prefix.
 function formatPdoRow(pdo) {
     const W = Math.round(pdo.powerMW / 1000);
     const Vmax = formatMilli(pdo.voltageMV);
     const A = formatMilli(pdo.currentMA);
     const hasMin = typeof pdo.minVoltageMV === 'number' && pdo.minVoltageMV > 0;
     const Vmin = hasMin ? formatMilli(pdo.minVoltageMV) : null;
-    const label = pdo.type ? `${pdo.type}: ` : '';
+    const label = pdo.typeLabel ? `${pdo.typeLabel}: ` : '';
 
     let body;
-    if (pdo.typeKey === 'battery') {
+    if (pdo.type === 'battery') {
         body = hasMin ? `${Vmin}–${Vmax}V — ${W}W` : `${Vmax}V — ${W}W`;
-    } else if (pdo.typeKey === 'avs' &&
+    } else if (pdo.type === 'avs' &&
                typeof pdo.currentMA9to15 === 'number' && pdo.currentMA9to15 > 0 &&
                typeof pdo.currentMA15to20 === 'number' && pdo.currentMA15to20 > 0) {
         const a9 = formatMilli(pdo.currentMA9to15);
@@ -112,7 +112,7 @@ function validateDevice(d) {
                 active: p.active,
             };
             if (typeof p.type === 'string') pdo.type = p.type;
-            if (typeof p.typeKey === 'string') pdo.typeKey = p.typeKey;
+            if (typeof p.typeLabel === 'string') pdo.typeLabel = p.typeLabel;
             if (typeof p.minVoltageMV === 'number') pdo.minVoltageMV = p.minVoltageMV;
             if (typeof p.currentMA9to15 === 'number') pdo.currentMA9to15 = p.currentMA9to15;
             if (typeof p.currentMA15to20 === 'number') pdo.currentMA15to20 = p.currentMA15to20;

@@ -80,7 +80,8 @@ export function fromUsbDevice(dev) {
             device: dev.devNum,
             isHub: dev.isHub,
             interfaces: dev.interfaces.map(i => ({
-                class: ClassDB.className(i.classCode),
+                classCode: i.classCode,
+                classLabel: ClassDB.className(i.classCode),
                 driver: i.driver,
             })),
         },
@@ -154,8 +155,10 @@ export function fromTypeCPort(port, pdPort, cable) {
             summary.bullets.push(`Cable PD revision: ${port.cable.pdRevision}`);
         summary.cable = {
             type: cable.cableType,
-            speed: cable.speed ? cableSpeedLabel(cable.speed) : null,
-            current: cable.currentRating ? cableCurrentLabel(cable.currentRating) : null,
+            speed: cable.speed,
+            speedLabel: cable.speed ? cableSpeedLabel(cable.speed) : null,
+            currentRating: cable.currentRating,
+            currentRatingLabel: cable.currentRating ? cableCurrentLabel(cable.currentRating) : null,
             maxWatts: cable.maxWatts,
             vendorId: formatHex16(cable.vendorId),
             vendorName: cable.vendorName,
@@ -169,13 +172,10 @@ export function fromTypeCPort(port, pdPort, cable) {
         if (pdPort.version && pdPort.revision !== port.pdRevision)
             summary.bullets.push(`PD spec: rev ${pdPort.revision} v${pdPort.version}`);
 
-        // type/typeKey: `type` keeps the human label (back-compat with
-        // earlier validateDevice consumers); `typeKey` carries the canonical
-        // enum used by render-side branching.
         summary.powerDelivery = {
             sourceCapabilities: pdPort.sourceCapabilities.map(p => ({
-                type: p.typeLabel,
-                typeKey: p.type,
+                type: p.type,
+                typeLabel: p.typeLabel,
                 voltageMV: p.voltageMV,
                 minVoltageMV: p.minVoltageMV,
                 currentMA: p.currentMA,
