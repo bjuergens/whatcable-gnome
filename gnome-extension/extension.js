@@ -321,9 +321,10 @@ class WhatCableIndicator extends PanelMenu.Button {
     }
 
     _appendDetails(parent, dev) {
-        // Surface the structured groups produced by device-summary.js as a
-        // nested "Details" submenu, with one section per group. PDO list is
-        // skipped here because it's already rendered above as "Charger profiles".
+        // Surface the structured groups produced by device-summary.js as an
+        // inline "Details" section, one separator per group. Nested
+        // PopupSubMenuMenuItems don't survive activate-bubbling inside another
+        // submenu (clicking them closes the parent), so we render flat.
         const sections = [];
         if (dev.usb)           sections.push(['USB', dev.usb, []]);
         if (dev.partner)       sections.push(['Partner', dev.partner, []]);
@@ -331,24 +332,23 @@ class WhatCableIndicator extends PanelMenu.Button {
         if (dev.powerDelivery) sections.push(['Power Delivery', dev.powerDelivery, ['sourceCapabilities']]);
         if (sections.length === 0) return;
 
-        const details = new PopupMenu.PopupSubMenuMenuItem('Details');
-        let first = true;
+        let any = false;
         for (const [name, data, skip] of sections) {
             const lines = detailLines(data, skip);
             if (lines.length === 0) continue;
-            if (!first)
-                details.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-            first = false;
+            if (!any) {
+                parent.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Details'));
+                any = true;
+            }
             const header = new PopupMenu.PopupMenuItem(name, {reactive: false});
             header.label.style_class = 'whatcable-subtitle';
-            details.menu.addMenuItem(header);
+            parent.menu.addMenuItem(header);
             for (const line of lines) {
-                const m = new PopupMenu.PopupMenuItem(line, {reactive: false});
+                const m = new PopupMenu.PopupMenuItem(`  ${line}`, {reactive: false});
                 m.label.style_class = 'whatcable-bullet';
-                details.menu.addMenuItem(m);
+                parent.menu.addMenuItem(m);
             }
         }
-        parent.menu.addMenuItem(details);
     }
 
     destroy() {
