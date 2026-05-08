@@ -83,4 +83,6 @@ WhatCable-GNOME is a port of [WhatCable](https://github.com/darrylmorley/whatcab
 
 ## License
 
-[MIT](LICENSE)
+This fork is licensed under [AGPL-3.0](LICENSE).
+
+It is derived from [WhatCable](https://github.com/darrylmorley/whatcable) by Darryl Morley, which is distributed under the MIT License. The original MIT notice is preserved in [LICENSE.MIT](LICENSE.MIT) as required by that license.
