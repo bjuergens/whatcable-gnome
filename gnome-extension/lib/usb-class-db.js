@@ -25,18 +25,6 @@ const CLASS_NAMES = {
     0xFF: 'Vendor Specific',
 };
 
-const SUBCLASS_NAMES = {
-    0x01: {0x01: 'Audio Control', 0x02: 'Audio Streaming', 0x03: 'MIDI Streaming'},
-    0x03: {0x00: 'HID (No Subclass)', 0x01: 'HID Boot Interface'},
-    0x08: {0x01: 'RBC', 0x02: 'MMC-5 (ATAPI)', 0x04: 'UFI', 0x06: 'SCSI', 0x08: 'UAS'},
-    0x0E: {0x01: 'Video Control', 0x02: 'Video Streaming'},
-    0xE0: {0x01: 'Bluetooth', 0x02: 'Wireless USB'},
-};
-
 export function className(classCode) {
     return CLASS_NAMES[classCode] ?? `0x${classCode.toString(16).padStart(2, '0')}`;
-}
-
-export function interfaceClassName(classCode, subClass) {
-    return SUBCLASS_NAMES[classCode]?.[subClass] ?? className(classCode);
 }

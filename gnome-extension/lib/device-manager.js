@@ -1,11 +1,45 @@
 // Single entrypoint for the panel indicator: returns the device list as
-// JSON-shaped objects ready for validateDevice() / _buildDeviceItem().
+// JSON-shaped objects consumed by extension.js _buildDeviceItem().
 
 import {enumerateUsbDevices} from './usb-device.js';
 import {enumerateTypecPorts} from './typec-port.js';
-import {enumeratePdPorts, PdProvenance, isPartnerProvenance} from './power-delivery.js';
-import {fromTypeCCable} from './cable-info.js';
+import {enumeratePdPorts, PdProvenance} from './power-delivery.js';
+import {decodeIDHeader, decodeCableVDO, ProductType} from './pd-decoder.js';
+import {lookupVendor} from './vendor-db.js';
 import * as DeviceSummary from './device-summary.js';
+
+// USB-C cable e-marker info derived from typec cable identity VDOs.
+// `cableType` is the source of truth ("active" / "passive" / ""); a cable VDO
+// can override the kernel-reported type (a passive-typed entry can decode as
+// an active cable per its e-marker).
+function cableInfo(cable) {
+    if (!cable) return null;
+    const idHeader = cable.identity?.vdos?.id_header;
+    // For cables, "Cable VDO" sits in product_type_vdo1 (PD VDO4) — see
+    // USB PD r3.x spec, Discover Identity response for SOP'.
+    const cableVdoRaw = cable.identity?.vdos?.product_type_vdo1;
+    const vendorId = cable.identity?.vendorId ?? 0;
+    const base = {
+        cableType: cable.type ?? '',
+        plugType: cable.plugType ?? '',
+        speed: null,
+        currentRating: null,
+        maxWatts: 0,
+        vendorId,
+        vendorName: vendorId ? lookupVendor(vendorId) : null,
+    };
+    if (idHeader === undefined || cableVdoRaw === undefined) return base;
+
+    const active = decodeIDHeader(idHeader).ufpProductType === ProductType.ActiveCable;
+    const cableVdo = decodeCableVDO(cableVdoRaw, active);
+    return {
+        ...base,
+        speed: cableVdo.speed,
+        currentRating: cableVdo.currentRating,
+        maxWatts: cableVdo.maxWatts,
+        cableType: cableVdo.isActive ? 'active' : 'passive',
+    };
+}
 
 // Return the PD port that represents the *charger's* offer for this typec
 // port. Never return a port-self entry: its source caps describe what the
@@ -17,7 +51,9 @@ function pairPdPort(tcPort, pdPorts, typecCount) {
     // is only useful as a hint — we still gate on provenance below.
     if (tcPort.pdPortName) {
         const named = pdPorts.find(pd => pd.name === tcPort.pdPortName);
-        if (named && isPartnerProvenance(named.provenance)) return named;
+        if (named && (named.provenance === PdProvenance.Partner ||
+                      named.provenance === PdProvenance.PartnerClass))
+            return named;
     }
     // UCSI: partner exposes its PDOs inline; tagged Partner at read time.
     const partnerPds = tcPort.partner?.pdPorts ?? [];
@@ -47,7 +83,7 @@ export async function collectDevices() {
 
     for (const tc of typecPorts) {
         const pd = pairPdPort(tc, pdPorts, typecPorts.length);
-        const cable = tc.cable ? fromTypeCCable(tc.cable) : null;
+        const cable = cableInfo(tc.cable);
         summaries.push(DeviceSummary.fromTypeCPort(tc, pd, cable));
     }
 

@@ -128,13 +128,11 @@ async function readPort(path, name) {
         pdPortName,
         partner,
         cable,
-        hasPartner: partner !== null,
-        hasCable: cable !== null,
     };
 }
 
 export function isConnected(port) {
-    return port.hasPartner || port.hasCable;
+    return port.partner !== null || port.cable !== null;
 }
 
 export function currentDataRole(port) {

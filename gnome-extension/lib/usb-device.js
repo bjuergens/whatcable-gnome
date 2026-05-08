@@ -1,31 +1,8 @@
 // Enumerate /sys/bus/usb/devices/.
 
 import * as Sysfs from './sysfs.js';
-import {formatVidPid} from './vendor-db.js';
 
 const USB_DEVICES_PATH = '/sys/bus/usb/devices';
-
-const SPEED_LABELS = [
-    [20000, 'USB4 20 Gbps'],
-    [10000, 'SuperSpeed+ 10 Gbps'],
-    [5000,  'SuperSpeed 5 Gbps'],
-    [480,   'High Speed 480 Mbps'],
-    [12,    'Full Speed 12 Mbps'],
-    [2,     'Low Speed 1.5 Mbps'],
-];
-
-function speedLabel(speedMbps) {
-    for (const [threshold, label] of SPEED_LABELS) {
-        if (speedMbps >= threshold) return label;
-    }
-    return 'Unknown speed';
-}
-
-function powerLabel(maxPowerMA) {
-    if (maxPowerMA <= 0) return '';
-    if (maxPowerMA >= 1000) return `${(maxPowerMA / 1000).toFixed(1)} W`;
-    return `${maxPowerMA} mA`;
-}
 
 function parseMaxPower(val) {
     if (!val) return 0;
@@ -115,18 +92,6 @@ async function readDevice(path, name) {
         isRootHub: name.startsWith('usb'),
         interfaces,
     };
-}
-
-export function displayName(dev) {
-    return dev.product || formatVidPid(dev.vendorId, dev.productId);
-}
-
-export function deviceSpeedLabel(dev) {
-    return speedLabel(dev.speed);
-}
-
-export function devicePowerLabel(dev) {
-    return powerLabel(dev.maxPowerMA);
 }
 
 export async function enumerateUsbDevices() {

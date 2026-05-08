@@ -1,12 +1,68 @@
-// Plain-English per-device summary.
-// Output shape matches what the panel indicator's validateDevice() consumes.
+// Plain-English per-device summary, consumed by the panel indicator.
 
-import {displayName, deviceSpeedLabel, devicePowerLabel} from './usb-device.js';
 import {currentDataRole, currentPowerRole, isConnected} from './typec-port.js';
-import {lookupVendor, formatHex16, formatVidPid} from './vendor-db.js';
+import {lookupVendor} from './vendor-db.js';
 import * as ClassDB from './usb-class-db.js';
 import {decodeIDHeader, productTypeLabel, cableSpeedLabel, cableCurrentLabel} from './pd-decoder.js';
-import * as ChargingDiagnostic from './charging-diagnostic.js';
+
+const hex16 = id => `0x${id.toString(16).padStart(4, '0')}`;
+const vidPid = (v, p) => `${v.toString(16).padStart(4, '0')}:${p.toString(16).padStart(4, '0')}`;
+
+const SPEED_LABELS = [
+    [20000, 'USB4 20 Gbps'],
+    [10000, 'SuperSpeed+ 10 Gbps'],
+    [5000,  'SuperSpeed 5 Gbps'],
+    [480,   'High Speed 480 Mbps'],
+    [12,    'Full Speed 12 Mbps'],
+    [2,     'Low Speed 1.5 Mbps'],
+];
+
+function speedLabel(speedMbps) {
+    for (const [threshold, label] of SPEED_LABELS) {
+        if (speedMbps >= threshold) return label;
+    }
+    return 'Unknown speed';
+}
+
+function powerLabel(maxPowerMA) {
+    if (maxPowerMA <= 0) return '';
+    if (maxPowerMA >= 1000) return `${(maxPowerMA / 1000).toFixed(1)} W`;
+    return `${maxPowerMA} mA`;
+}
+
+// Identify charging bottlenecks (cable limit vs charger limit vs device).
+function chargingDiagnostic(pdPort, cable) {
+    if (!pdPort || pdPort.sourceCapabilities.length === 0) return null;
+    const chargerMaxW = Math.floor(pdPort.maxSourcePowerMW / 1000);
+    if (chargerMaxW <= 0) return null;
+
+    // activeW is the actually-negotiated PDO power. Until the kernel exposes
+    // the active PDO via /sys (see TODO in power-delivery.js#parsePdo), this
+    // is always 0 and the activeW branch below stays dormant.
+    const active = pdPort.sourceCapabilities.find(p => p.isActive);
+    const activeW = active ? Math.floor(active.powerMW / 1000) : 0;
+    const cableMaxW = cable?.maxWatts > 0 ? cable.maxWatts : 0;
+
+    if (cableMaxW > 0 && cableMaxW < chargerMaxW) {
+        return {
+            summary: 'Cable is limiting charging speed',
+            detail: `Cable rated for ${cableMaxW}W, but charger can deliver ${chargerMaxW}W`,
+            isWarning: true,
+        };
+    }
+    if (activeW > 0 && activeW < chargerMaxW * 0.8) {
+        return {
+            summary: `Charging at ${activeW}W`,
+            detail: `Charging at ${activeW}W (charger can do up to ${chargerMaxW}W)`,
+            isWarning: false,
+        };
+    }
+    return {
+        summary: `Charging well at ${activeW || chargerMaxW}W`,
+        detail: '',
+        isWarning: false,
+    };
+}
 
 const ICON_BY_DEVICE_TYPE = [
     ['Audio',         'audio-card'],
@@ -46,8 +102,8 @@ export function fromUsbDevice(dev) {
 
     const subtitle = [vendorName, deviceType].filter(Boolean).join(' · ');
 
-    const bullets = [deviceSpeedLabel(dev)];
-    if (dev.maxPowerMA > 0) bullets.push(`Power: ${devicePowerLabel(dev)}`);
+    const bullets = [speedLabel(dev.speed)];
+    if (dev.maxPowerMA > 0) bullets.push(`Power: ${powerLabel(dev.maxPowerMA)}`);
     if (dev.version) bullets.push(`USB ${dev.version}`);
     if (dev.serial) bullets.push(`Serial: ${dev.serial}`);
     if (dev.removable === 'removable') bullets.push('Removable');
@@ -57,21 +113,21 @@ export function fromUsbDevice(dev) {
         dev.interfaces.map(i => i.driver).filter(Boolean))];
     if (drivers.length > 0) bullets.push(`Drivers: ${drivers.join(', ')}`);
 
-    bullets.push(`VID:PID ${formatVidPid(dev.vendorId, dev.productId)}`);
+    bullets.push(`VID:PID ${vidPid(dev.vendorId, dev.productId)}`);
 
     return {
         category: dev.isHub ? 'hub' : 'usb',
-        headline: displayName(dev),
+        headline: dev.product || vidPid(dev.vendorId, dev.productId),
         subtitle,
         icon: pickIcon(dev.isHub, deviceType),
         bullets,
         usb: {
-            vendorId: formatHex16(dev.vendorId),
-            productId: formatHex16(dev.productId),
+            vendorId: hex16(dev.vendorId),
+            productId: hex16(dev.productId),
             manufacturer: dev.manufacturer,
             product: dev.product,
             speed: dev.speed,
-            speedLabel: deviceSpeedLabel(dev),
+            speedLabel: speedLabel(dev.speed),
             version: dev.version,
             maxPowerMA: dev.maxPowerMA,
             serial: dev.serial,
@@ -104,8 +160,8 @@ function cableBullets(cable) {
     if (cable.speed) bullets.push(`Cable speed: ${cableSpeedLabel(cable.speed)}`);
     if (cable.currentRating) bullets.push(`Cable current: ${cableCurrentLabel(cable.currentRating)}`);
     if (cable.maxWatts > 0) bullets.push(`Cable max power: ${cable.maxWatts}W`);
-    if (cable.isActive) bullets.push('Active cable');
-    else if (cable.isPassive) bullets.push('Passive cable');
+    if (cable.cableType === 'active') bullets.push('Active cable');
+    else if (cable.cableType === 'passive') bullets.push('Passive cable');
     if (cable.vendorName) bullets.push(`Cable vendor: ${cable.vendorName}`);
     return bullets;
 }
@@ -134,18 +190,8 @@ export function fromTypeCPort(port, pdPort, cable) {
 
     summary.subtitle = partnerSubtitle(port.partner);
 
-    const dataStr = currentDataRole(port);
-    const powerStr = currentPowerRole(port);
-    if (dataStr || powerStr) {
-        const parts = [];
-        if (dataStr)  parts.push(`Data: ${dataStr}`);
-        if (powerStr) parts.push(`Power: ${powerStr}`);
-        summary.bullets.push(parts.join(', '));
-    }
     if (port.powerOpMode) summary.bullets.push(`Power mode: ${port.powerOpMode}`);
     if (port.pdRevision) summary.bullets.push(`PD revision: ${port.pdRevision}`);
-    if (port.partner?.pdRevision && port.partner.pdRevision !== port.pdRevision)
-        summary.bullets.push(`Partner PD revision: ${port.partner.pdRevision}`);
     if (port.orientation && port.orientation !== 'unknown')
         summary.bullets.push(`Plug orientation: ${port.orientation}`);
 
@@ -156,7 +202,7 @@ export function fromTypeCPort(port, pdPort, cable) {
             type: port.partner.type,
             productType: hdr?.ufpProductType ?? null,
             productTypeLabel: hdr ? productTypeLabel(hdr.ufpProductType) : null,
-            vendorId: hdr ? formatHex16(hdr.vendorId) : null,
+            vendorId: hdr ? hex16(hdr.vendorId) : null,
             vendorName: hdr ? lookupVendor(hdr.vendorId) : null,
             pdRevision: port.partner.pdRevision || null,
         };
@@ -164,8 +210,6 @@ export function fromTypeCPort(port, pdPort, cable) {
 
     if (cable) {
         summary.bullets.push(...cableBullets(cable));
-        if (port.cable?.pdRevision && port.cable.pdRevision !== port.pdRevision)
-            summary.bullets.push(`Cable PD revision: ${port.cable.pdRevision}`);
         summary.cable = {
             type: cable.cableType,
             speed: cable.speed,
@@ -173,7 +217,7 @@ export function fromTypeCPort(port, pdPort, cable) {
             currentRating: cable.currentRating,
             currentRatingLabel: cable.currentRating ? cableCurrentLabel(cable.currentRating) : null,
             maxWatts: cable.maxWatts,
-            vendorId: formatHex16(cable.vendorId),
+            vendorId: hex16(cable.vendorId),
             vendorName: cable.vendorName,
             pdRevision: port.cable?.pdRevision ?? null,
         };
@@ -205,16 +249,8 @@ export function fromTypeCPort(port, pdPort, cable) {
         };
     }
 
-    if (pdPort) {
-        const diag = ChargingDiagnostic.evaluate(pdPort, cable);
-        if (diag) {
-            summary.charging = {
-                summary: diag.summary,
-                detail: diag.detail,
-                isWarning: diag.isWarning,
-            };
-        }
-    }
+    const diag = chargingDiagnostic(pdPort, cable);
+    if (diag) summary.charging = diag;
 
     return summary;
 }

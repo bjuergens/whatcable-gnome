@@ -57,74 +57,36 @@ function formatPdoRow(pdo) {
         : `${label}${body}`;
 }
 
-// Permissive shape check for one device entry produced by collectDevices().
-// Returns {ok: true, device} where `device` is a sanitized copy holding only
-// well-typed fields (so a wrong-typed optional field degrades to "missing"
-// rather than throwing in `_buildDeviceItem`), or {ok: false, summary} if the
-// entry can't be rendered at all (no headline).
-function validateDevice(d) {
-    if (!d || typeof d !== 'object' || Array.isArray(d))
-        return {ok: false, summary: 'not an object'};
-    if (typeof d.headline !== 'string' || d.headline.length === 0)
-        return {ok: false, summary: 'missing headline'};
+// camelCase / lowerCamel → "Title Case" for detail labels.
+function humanizeKey(k) {
+    return k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase());
+}
 
-    const out = {headline: d.headline};
+function formatInterface(i) {
+    const cls = `0x${i.classCode.toString(16).padStart(2, '0')} ${i.classLabel}`;
+    return i.driver ? `${cls} · ${i.driver}` : cls;
+}
 
-    if (typeof d.category === 'string') out.category = d.category;
-    if (typeof d.subtitle === 'string') out.subtitle = d.subtitle;
-
-    if (Array.isArray(d.bullets))
-        out.bullets = d.bullets.filter(b => typeof b === 'string');
-
-    if (d.typec && typeof d.typec === 'object' && !Array.isArray(d.typec)) {
-        out.typec = {};
-        if (typeof d.typec.connected === 'boolean')
-            out.typec.connected = d.typec.connected;
-    }
-
-    if (d.usb && typeof d.usb === 'object' && !Array.isArray(d.usb)) {
-        out.usb = {};
-        if (typeof d.usb.removable === 'string')
-            out.usb.removable = d.usb.removable;
-    }
-
-    if (d.charging && typeof d.charging === 'object' && !Array.isArray(d.charging)) {
-        const c = {};
-        if (typeof d.charging.summary === 'string') c.summary = d.charging.summary;
-        if (typeof d.charging.isWarning === 'boolean') c.isWarning = d.charging.isWarning;
-        if (typeof d.charging.detail === 'string') c.detail = d.charging.detail;
-        if (c.summary) out.charging = c;
-    }
-
-    if (d.powerDelivery && typeof d.powerDelivery === 'object' &&
-        Array.isArray(d.powerDelivery.sourceCapabilities)) {
-        const pdos = [];
-        for (const p of d.powerDelivery.sourceCapabilities) {
-            if (!p || typeof p !== 'object' || Array.isArray(p)) continue;
-            if (typeof p.voltageMV !== 'number') continue;
-            if (typeof p.currentMA !== 'number') continue;
-            if (typeof p.powerMW !== 'number') continue;
-            if (typeof p.active !== 'boolean') continue;
-            const pdo = {
-                voltageMV: p.voltageMV,
-                currentMA: p.currentMA,
-                powerMW: p.powerMW,
-                active: p.active,
-            };
-            if (typeof p.type === 'string') pdo.type = p.type;
-            if (typeof p.typeLabel === 'string') pdo.typeLabel = p.typeLabel;
-            if (typeof p.minVoltageMV === 'number') pdo.minVoltageMV = p.minVoltageMV;
-            if (typeof p.currentMA9to15 === 'number') pdo.currentMA9to15 = p.currentMA9to15;
-            if (typeof p.currentMA15to20 === 'number') pdo.currentMA15to20 = p.currentMA15to20;
-            if (typeof p.peakCurrentMA === 'number') pdo.peakCurrentMA = p.peakCurrentMA;
-            if (typeof p.ppsPowerLimited === 'boolean') pdo.ppsPowerLimited = p.ppsPowerLimited;
-            pdos.push(pdo);
+// Render a flat group of scalar key/values plus a few structured arrays we
+// know how to format. Returns a list of strings; skipped fields stay hidden.
+function detailLines(group, skipKeys = []) {
+    const lines = [];
+    for (const [k, v] of Object.entries(group)) {
+        if (skipKeys.includes(k)) continue;
+        if (v === null || v === undefined || v === '' || v === 0 || v === false)
+            continue;
+        if (Array.isArray(v)) {
+            if (v.length === 0) continue;
+            if (k === 'interfaces') {
+                lines.push('Interfaces:');
+                for (const iface of v) lines.push(`  ${formatInterface(iface)}`);
+            }
+            continue;
         }
-        if (pdos.length > 0)
-            out.powerDelivery = {sourceCapabilities: pdos};
+        if (typeof v === 'object') continue;
+        lines.push(`${humanizeKey(k)}: ${v}`);
     }
-
-    return {ok: true, device: out};
+    return lines;
 }
 
 // Returns the buildinfo.json timestamp, or null when the file isn't there
@@ -215,10 +177,13 @@ class WhatCableIndicator extends PanelMenu.Button {
             'Show empty ports', 'show-empty-ports');
         this._showInternalDevicesItem = this._bindStickySwitch(
             'Show internal devices', 'show-internal-devices');
+        this._showDetailsItem = this._bindStickySwitch(
+            'Show details', 'show-details');
         this._debugMenu.menu.addMenuItem(this._buildTimeItem);
         this._debugMenu.menu.addMenuItem(this._lastRefreshItem);
         this._debugMenu.menu.addMenuItem(this._showEmptyPortsItem);
         this._debugMenu.menu.addMenuItem(this._showInternalDevicesItem);
+        this._debugMenu.menu.addMenuItem(this._showDetailsItem);
         this.menu.addMenuItem(this._debugMenu);
         this._updateDebugItems();
     }
@@ -286,17 +251,9 @@ class WhatCableIndicator extends PanelMenu.Button {
         const showEmptyPorts = this._settings.get_boolean('show-empty-ports');
         const showInternalDevices = this._settings.get_boolean('show-internal-devices');
 
-        // Validate first, then filter. Invalid entries become warning rows so
-        // a single malformed device never breaks the rest of the menu.
-        const entries = devices.map(d => {
-            const result = validateDevice(d);
-            return result.ok ? {kind: 'ok', device: result.device}
-                              : {kind: 'bad', summary: result.summary};
-        }).filter(entry => {
-            if (entry.kind !== 'ok') return true;
-            const d = entry.device;
+        const visible = devices.filter(d => {
             if (!showEmptyPorts &&
-                d.category === 'typec' && d.typec && !d.typec.connected)
+                d.category === 'typec' && !d.typec?.connected)
                 return false;
             if (!showInternalDevices &&
                 d.category !== 'typec' && d.usb?.removable === 'fixed')
@@ -304,39 +261,23 @@ class WhatCableIndicator extends PanelMenu.Button {
             return true;
         });
 
-        const signature = JSON.stringify(entries);
+        const signature = JSON.stringify(visible);
         if (signature === this._lastSignature)
             return;
         this._lastSignature = signature;
 
-        const validCount = entries.filter(e => e.kind === 'ok').length;
-        const badCount = entries.length - validCount;
-        this._countLabel.text = validCount > 0 ? ` ${validCount}` : '';
-        if (validCount === 0 && badCount === 0) {
-            this._statusItem.label.text = 'No USB devices found';
-        } else {
-            const parts = [`${validCount} USB device${validCount === 1 ? '' : 's'}`];
-            if (badCount > 0)
-                parts.push(`${badCount} malformed`);
-            this._statusItem.label.text = parts.join(', ');
-        }
+        const count = visible.length;
+        this._countLabel.text = count > 0 ? ` ${count}` : '';
+        this._statusItem.label.text = count === 0
+            ? 'No USB devices found'
+            : `${count} USB device${count === 1 ? '' : 's'}`;
 
         this._devicesSection.removeAll();
-        for (const entry of entries) {
-            if (entry.kind === 'ok') {
-                this._devicesSection.addMenuItem(this._buildDeviceItem(entry.device));
-            } else {
-                const item = new PopupMenu.PopupMenuItem(
-                    `⚠ Malformed device entry (${entry.summary})`,
-                    {reactive: false});
-                item.label.style_class = 'whatcable-warning';
-                this._devicesSection.addMenuItem(item);
-            }
-        }
+        for (const dev of visible)
+            this._devicesSection.addMenuItem(this._buildDeviceItem(dev));
     }
 
     _buildDeviceItem(dev) {
-        // headline is guaranteed non-empty by validateDevice.
         const item = new PopupMenu.PopupSubMenuMenuItem(dev.headline);
 
         if (dev.subtitle) {
@@ -365,19 +306,69 @@ class WhatCableIndicator extends PanelMenu.Button {
             }
         }
 
+        // Charger profiles main section: only the highest-power PDO and the
+        // currently-negotiated PDO (if known). The rest move to Details.
         const pdos = dev.powerDelivery?.sourceCapabilities ?? [];
+        const featured = new Set();
         if (pdos.length > 0) {
+            const maxIdx = pdos.reduce(
+                (m, p, i) => p.powerMW > pdos[m].powerMW ? i : m, 0);
+            featured.add(maxIdx);
+            pdos.forEach((p, i) => { if (p.active) featured.add(i); });
+
             item.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Charger profiles'));
-            for (const pdo of pdos) {
-                const marker = pdo.active ? '  ◀ active' : '';
-                const text = formatPdoRow(pdo) + marker;
-                const p = new PopupMenu.PopupMenuItem(text, {reactive: false});
+            pdos.forEach((pdo, i) => {
+                if (!featured.has(i)) return;
+                const marker = pdo.active
+                    ? '  ◀ active'
+                    : (i === maxIdx ? '  ◀ max' : '');
+                const p = new PopupMenu.PopupMenuItem(
+                    formatPdoRow(pdo) + marker, {reactive: false});
                 p.label.style_class = pdo.active ? 'whatcable-ok' : 'whatcable-bullet';
                 item.menu.addMenuItem(p);
-            }
+            });
         }
 
+        if (this._settings.get_boolean('show-details'))
+            this._appendDetails(item, dev, pdos, featured);
+
         return item;
+    }
+
+    _appendDetails(parent, dev, pdos, featuredPdoIndices) {
+        // Surface the structured groups produced by device-summary.js as an
+        // inline "Details" section. Nested PopupSubMenuMenuItems don't survive
+        // activate-bubbling inside another submenu, so render flat.
+        const sections = [];
+        if (dev.typec)         sections.push(['Type-C', dev.typec, ['port', 'connected']]);
+        if (dev.usb)           sections.push(['USB', dev.usb, []]);
+        if (dev.partner)       sections.push(['Partner', dev.partner, []]);
+        if (dev.cable)         sections.push(['Cable', dev.cable, []]);
+        if (dev.powerDelivery) sections.push(['Power Delivery', dev.powerDelivery, ['sourceCapabilities']]);
+
+        const extraPdos = pdos.filter((_, i) => !featuredPdoIndices.has(i));
+
+        if (sections.length === 0 && extraPdos.length === 0) return;
+
+        parent.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Details'));
+
+        const addLines = (header, lines) => {
+            if (lines.length === 0) return;
+            const h = new PopupMenu.PopupMenuItem(header, {reactive: false});
+            h.label.style_class = 'whatcable-subtitle';
+            parent.menu.addMenuItem(h);
+            for (const line of lines) {
+                const m = new PopupMenu.PopupMenuItem(`  ${line}`, {reactive: false});
+                m.label.style_class = 'whatcable-bullet';
+                parent.menu.addMenuItem(m);
+            }
+        };
+
+        for (const [name, data, skip] of sections)
+            addLines(name, detailLines(data, skip));
+
+        if (extraPdos.length > 0)
+            addLines('Other charger profiles', extraPdos.map(formatPdoRow));
     }
 
     destroy() {
