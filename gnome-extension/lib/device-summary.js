@@ -145,9 +145,22 @@ export function fromTypeCPort(port, pdPort, cable) {
     if (port.powerOpMode) summary.bullets.push(`Power mode: ${port.powerOpMode}`);
     if (port.pdRevision) summary.bullets.push(`PD revision: ${port.pdRevision}`);
     if (port.partner?.pdRevision && port.partner.pdRevision !== port.pdRevision)
-        summary.bullets.push(`Partner advertises PD ${port.partner.pdRevision}`);
+        summary.bullets.push(`Partner PD revision: ${port.partner.pdRevision}`);
     if (port.orientation && port.orientation !== 'unknown')
         summary.bullets.push(`Plug orientation: ${port.orientation}`);
+
+    if (port.partner) {
+        const idHeader = port.partner.identity?.vdos?.id_header;
+        const hdr = idHeader !== undefined ? decodeIDHeader(idHeader) : null;
+        summary.partner = {
+            type: port.partner.type,
+            productType: hdr?.ufpProductType ?? null,
+            productTypeLabel: hdr ? productTypeLabel(hdr.ufpProductType) : null,
+            vendorId: hdr ? formatHex16(hdr.vendorId) : null,
+            vendorName: hdr ? lookupVendor(hdr.vendorId) : null,
+            pdRevision: port.partner.pdRevision || null,
+        };
+    }
 
     if (cable) {
         summary.bullets.push(...cableBullets(cable));
@@ -170,7 +183,7 @@ export function fromTypeCPort(port, pdPort, cable) {
         const maxW = Math.floor(pdPort.maxSourcePowerMW / 1000);
         summary.bullets.push(`Charger max: ${maxW}W`);
         if (pdPort.version && pdPort.revision !== port.pdRevision)
-            summary.bullets.push(`PD spec: rev ${pdPort.revision} v${pdPort.version}`);
+            summary.bullets.push(`PD spec version: ${pdPort.version}`);
 
         summary.powerDelivery = {
             sourceCapabilities: pdPort.sourceCapabilities.map(p => ({

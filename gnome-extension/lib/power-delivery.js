@@ -158,9 +158,9 @@ async function parsePdo(pdoPath, entryName, role) {
         // the controller and is only reachable via driver-specific debugfs
         // (e.g. /sys/kernel/debug/tcpm/) or PD trace events.
         // /sys/class/typec/portN/power_operation_mode signals *whether* PD is
-        // in use ("usb_power_delivery") but not which PDO; surfaced via
-        // typec.powerOpMode rather than per-PDO. Until something better lands
-        // upstream, every PDO renders as inactive.
+        // in use ("usb_power_delivery") but not which PDO; the typec port
+        // surfaces it as the "Power mode" bullet rather than per-PDO. Until
+        // something better lands upstream, every PDO renders as inactive.
         isActive: false,
     };
 }
