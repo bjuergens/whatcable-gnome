@@ -144,7 +144,9 @@ export function fromUsbDevice(dev) {
 function partnerSubtitle(partner) {
     if (!partner) return '';
     const idHeader = partner.identity?.vdos?.id_header;
-    if (idHeader === undefined) return 'Device connected';
+    // No decoded identity: stay silent — the bullets below already make it
+    // obvious that something is attached.
+    if (idHeader === undefined) return '';
 
     const hdr = decodeIDHeader(idHeader);
     const productLabel = productTypeLabel(hdr.ufpProductType);
@@ -203,8 +205,9 @@ export function fromTypeCPort(port, pdPort, cable) {
 
     // Partner advertises its own PD revision; surface only when it diverges
     // from the port's, since that's the case where it tells you something new.
-    if (port.partner?.pdRevision && port.partner.pdRevision !== port.pdRevision)
-        summary.bullets.push(`Partner PD ${port.partner.pdRevision}`);
+    const partnerPd = port.partner?.pdRevision;
+    if (partnerPd && partnerPd !== '0.0' && partnerPd !== port.pdRevision)
+        summary.bullets.push(`Partner PD ${partnerPd}`);
 
     if (port.partner) {
         const idHeader = port.partner.identity?.vdos?.id_header;

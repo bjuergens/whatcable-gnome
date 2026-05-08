@@ -340,7 +340,6 @@ class WhatCableIndicator extends PanelMenu.Button {
             featured.add(maxIdx);
             pdos.forEach((p, i) => { if (p.active) featured.add(i); });
 
-            item.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Charger profiles'));
             pdos.forEach((pdo, i) => {
                 if (!featured.has(i)) return;
                 const marker = pdo.active && i === maxIdx ? '  ◀ active · max'
