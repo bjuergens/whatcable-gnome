@@ -307,11 +307,10 @@ class WhatCableIndicator extends PanelMenu.Button {
         // name) without splitting the label into multiple actors.
         if (dev.headlineMarkup)
             item.label.clutter_text.set_use_markup(true);
-        const headlineClasses = [];
+        const headlineClasses = ['whatcable-device-headline'];
         if (dev.category === 'typec') headlineClasses.push('whatcable-typec-headline');
         if (dev.headlineClass) headlineClasses.push(dev.headlineClass);
-        if (headlineClasses.length > 0)
-            item.label.style_class = headlineClasses.join(' ');
+        item.label.style_class = headlineClasses.join(' ');
 
         if (dev.subtitle) {
             const sub = new PopupMenu.PopupMenuItem(dev.subtitle, {reactive: false});
@@ -321,11 +320,15 @@ class WhatCableIndicator extends PanelMenu.Button {
 
         for (const bullet of dev.bullets ?? []) {
             // Bullets can be plain strings or {text, class} for one-off
-            // styling (e.g. cable-limited cable bullet rendered amber).
+            // styling (e.g. cable-limited cable bullet rendered amber). The
+            // base whatcable-bullet class always applies — overrides only
+            // contribute color, and the indent/border come from the base.
             const text = typeof bullet === 'string' ? bullet : bullet.text;
-            const cls = typeof bullet === 'string' ? 'whatcable-bullet' : bullet.class;
+            const extra = typeof bullet === 'string' ? null : bullet.class;
             const b = new PopupMenu.PopupMenuItem(`• ${text}`, {reactive: false});
-            b.label.style_class = cls;
+            b.label.style_class = extra
+                ? `whatcable-bullet ${extra}`
+                : 'whatcable-bullet';
             item.menu.addMenuItem(b);
         }
 
