@@ -1,47 +1,24 @@
 // Enumerate /sys/class/typec/.
 
-import {sysfsToJson, asString, asHex, symlinkTarget} from './sysfsToJson.js';
-import {readPort as readPdPort, PdProvenance, PD_FILES} from './power-delivery.js';
-
-const TYPEC_PORT_FILES = new Set([
-    // port attrs
-    'data_role', 'power_role', 'port_type', 'power_operation_mode',
-    'orientation', 'usb_power_delivery_revision', 'usb_typec_revision',
-    // partner / cable attrs
-    'type', 'plug_type', 'supports_usb_power_delivery',
-    // identity (named VDO files; vdo* pattern handled in the predicate)
-    'id_header', 'cert_stat', 'product',
-    'product_type_vdo1', 'product_type_vdo2', 'product_type_vdo3',
-]);
-
-function typecAllow(name) {
-    return TYPEC_PORT_FILES.has(name) || PD_FILES.has(name) || name.startsWith('vdo');
-}
+import {sysfsToJson, asString, asHex, isDirObject} from './sysfsToJson.js';
+import {readPort as readPdPort, PdProvenance} from './power-delivery.js';
+import {typecAllow} from './sysfs-allowlist.js';
 
 const TYPEC_PATH = '/sys/class/typec';
-const PARTNER_PD_RE = /^pd\d+$/;
 const PORT_NUM_RE = /^port(\d+)$/;
-
-const VDO_FILES = new Set([
-    'id_header',
-    'cert_stat',
-    'product',
-    'product_type_vdo1',
-    'product_type_vdo2',
-    'product_type_vdo3',
-]);
+const BRACKET_RE = /\[([^\]]+)\]/;
 
 function readIdentity(entry) {
     const id = entry?.identity;
-    if (!id || typeof id !== 'object' || id._error) return null;
+    if (!isDirObject(id)) return null;
 
     // Keyed by filename, not position. The kernel exposes id_header, cert_stat,
     // product, product_type_vdo1..3 as named files; alphabetical iteration would
     // put cert_stat (= PD VDO2) at index 0 and decoders that expect VDO1 at
-    // index 0 would silently decode the wrong word.
+    // index 0 would silently decode the wrong word. The allowlist already
+    // restricts what's in here to VDO names, so just parse them all.
     const vdos = {};
     for (const [name, val] of Object.entries(id)) {
-        if (!(name.startsWith('vdo') || VDO_FILES.has(name))) continue;
         const n = asHex(val);
         if (n !== null) vdos[name] = n;
     }
@@ -61,43 +38,30 @@ function readIdentity(entry) {
 function readPartnerPdPorts(partnerEntry) {
     const ports = [];
     for (const [key, val] of Object.entries(partnerEntry)) {
-        if (!PARTNER_PD_RE.test(key)) continue;
-        if (!val || typeof val !== 'object' || val._error) continue;
+        if (!/^pd\d+$/.test(key)) continue;
+        if (!isDirObject(val)) continue;
         const port = readPdPort(val, key, PdProvenance.Partner);
         if (port) ports.push(port);
     }
     return ports;
 }
 
-function readPartner(partnerEntry) {
+// Partners and cables share most of their attribute shape; cable adds
+// plug_type, partner adds inline pdN/ subdirs. Empty defaults on the
+// non-applicable side are harmless and let consumers stop branching.
+function readPeer(entry) {
     return {
-        type: asString(partnerEntry.type) ?? '',
-        pdRevision: asString(partnerEntry.usb_power_delivery_revision) ?? '',
-        identity: readIdentity(partnerEntry),
-        pdPorts: readPartnerPdPorts(partnerEntry),
-    };
-}
-
-function readCable(cableEntry) {
-    return {
-        type: asString(cableEntry.type) ?? '',
-        plugType: asString(cableEntry.plug_type) ?? '',
-        pdRevision: asString(cableEntry.usb_power_delivery_revision) ?? '',
-        identity: readIdentity(cableEntry),
+        type: asString(entry.type) ?? '',
+        plugType: asString(entry.plug_type) ?? '',
+        pdRevision: asString(entry.usb_power_delivery_revision) ?? '',
+        identity: readIdentity(entry),
+        pdPorts: readPartnerPdPorts(entry),
     };
 }
 
 function readPort(entry, partnerEntry, cableEntry) {
     const numMatch = PORT_NUM_RE.exec(entry._name);
     if (!numMatch) return null;
-
-    // Kernel exposes the typec→PD association as a `usb_power_delivery`
-    // symlink (e.g. `/sys/class/typec/port0/usb_power_delivery -> ../../usb_power_delivery/source0`).
-    // Pick up the basename to pair with the PD port enumeration without
-    // guessing port indices.
-    const pdPortName = symlinkTarget(entry.usb_power_delivery);
-    const partner = partnerEntry ? readPartner(partnerEntry) : null;
-    const cable = cableEntry ? readCable(cableEntry) : null;
 
     return {
         portName: entry._name,
@@ -109,15 +73,10 @@ function readPort(entry, partnerEntry, cableEntry) {
         orientation: asString(entry.orientation) ?? '',
         pdRevision: asString(entry.usb_power_delivery_revision) ?? '',
         usbTypeCRev: asString(entry.usb_typec_revision) ?? '',
-        pdPortName,
-        partner,
-        cable,
-        hasPartner: partner !== null,
-        hasCable: cable !== null,
+        partner: partnerEntry ? readPeer(partnerEntry) : null,
+        cable: cableEntry ? readPeer(cableEntry) : null,
     };
 }
-
-const BRACKET_RE = /\[([^\]]+)\]/;
 
 function extractCurrentRole(value) {
     if (!value) return '';
@@ -125,7 +84,7 @@ function extractCurrentRole(value) {
 }
 
 export function isConnected(port) {
-    return port.hasPartner || port.hasCable;
+    return port.partner !== null || port.cable !== null;
 }
 
 export function currentDataRole(port) {

@@ -1,20 +1,11 @@
 // Enumerate /sys/bus/usb/devices/.
 
-import {sysfsToJson, asString, asInt, asHex, symlinkTarget} from './sysfsToJson.js';
+import {sysfsToJson, asString, asInt, asHex, symlinkTarget, isDirObject} from './sysfsToJson.js';
 import {formatVidPid} from './vendor-db.js';
+import {USB_FILES} from './sysfs-allowlist.js';
 
 const USB_DEVICES_PATH = '/sys/bus/usb/devices';
 const IFACE_KEY_RE = /:/;
-
-const USB_FILES = new Set([
-    // device attrs
-    'idVendor', 'idProduct', 'manufacturer', 'product', 'serial', 'version',
-    'removable', 'speed', 'bMaxPower', 'busnum', 'devnum',
-    'rx_lanes', 'tx_lanes', 'bNumConfigurations',
-    'bDeviceClass', 'bDeviceSubClass', 'bDeviceProtocol', 'bNumInterfaces',
-    // interface attrs
-    'bInterfaceClass', 'bInterfaceSubClass', 'bInterfaceProtocol',
-]);
 
 const SPEED_LABELS = [
     [20000, 'USB4 20 Gbps'],
@@ -38,17 +29,11 @@ function powerLabel(maxPowerMA) {
     return `${maxPowerMA} mA`;
 }
 
-function parseMaxPower(val) {
-    if (typeof val !== 'string' || !val) return 0;
-    const numeric = val.replace(/[^0-9]/g, '');
-    return numeric ? parseInt(numeric, 10) || 0 : 0;
-}
-
 function readInterfaces(entry) {
     const interfaces = [];
     for (const [key, val] of Object.entries(entry)) {
         if (!IFACE_KEY_RE.test(key)) continue;
-        if (!val || typeof val !== 'object' || val._error) continue;
+        if (!isDirObject(val)) continue;
         const cls = asHex(val.bInterfaceClass);
         if (cls === null) continue;
         interfaces.push({
@@ -80,10 +65,11 @@ function readDevice(entry) {
         manufacturer: asString(entry.manufacturer) ?? '',
         product: asString(entry.product) ?? '',
         serial: asString(entry.serial) ?? '',
-        version: asString(entry.version)?.trim() ?? '',
+        version: asString(entry.version) ?? '',
         removable: asString(entry.removable) ?? '',
         speed: asInt(entry.speed) ?? 0,
-        maxPowerMA: parseMaxPower(asString(entry.bMaxPower)),
+        // bMaxPower is "500mA" — parseInt stops at 'm', no regex needed.
+        maxPowerMA: parseInt(asString(entry.bMaxPower) ?? '', 10) || 0,
         busNum: asInt(entry.busnum) ?? 0,
         devNum: asInt(entry.devnum) ?? 0,
         rxLanes: asInt(entry.rx_lanes) ?? 0,

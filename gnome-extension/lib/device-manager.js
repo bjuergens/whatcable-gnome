@@ -3,7 +3,7 @@
 
 import {enumerateUsbDevices} from './usb-device.js';
 import {enumerateTypecPorts} from './typec-port.js';
-import {enumeratePdPorts, PdProvenance, isPartnerProvenance} from './power-delivery.js';
+import {enumeratePdPorts, PdProvenance} from './power-delivery.js';
 import {fromTypeCCable} from './cable-info.js';
 import * as DeviceSummary from './device-summary.js';
 
@@ -12,13 +12,6 @@ import * as DeviceSummary from './device-summary.js';
 // host can advertise, not what the charger provides, and surfacing it as
 // "charger max" is the bug this provenance tagging exists to prevent.
 function pairPdPort(tcPort, pdPorts, typecCount) {
-    // Preferred: kernel's own typec→PD symlink (typec/portN/usb_power_delivery).
-    // That symlink targets the *port's* PD entry (port-self), so a name match
-    // is only useful as a hint — we still gate on provenance below.
-    if (tcPort.pdPortName) {
-        const named = pdPorts.find(pd => pd.name === tcPort.pdPortName);
-        if (named && isPartnerProvenance(named.provenance)) return named;
-    }
     // UCSI: partner exposes its PDOs inline; tagged Partner at read time.
     const partnerPds = tcPort.partner?.pdPorts ?? [];
     const partnerInline = partnerPds.find(p => p.sourceCapabilities.length > 0)

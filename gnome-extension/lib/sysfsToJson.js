@@ -110,9 +110,9 @@ async function _dirToObject(path, depth, allowFile) {
  * @returns {Promise<Array>}
  */
 export async function sysfsToJson(rootPath, {files} = {}) {
-    const allowFile = files instanceof Set
-        ? (name => files.has(name))
-        : (typeof files === 'function' ? files : (() => true));
+    const allowFile = typeof files === 'function' ? files
+        : files ? (name => files.has(name))
+        : (() => true);
 
     const result = [];
     for await (const info of _iterChildren(rootPath)) {
@@ -157,4 +157,13 @@ export function symlinkTarget(v) {
     return v && typeof v === 'object' && typeof v._symlink === 'string'
         ? v._symlink
         : null;
+}
+
+// True for nested-directory objects produced by _dirToObject — i.e. real
+// subdirs whose children we want to walk. Excludes null, primitives, error
+// sentinels, and symlink leaves.
+export function isDirObject(v) {
+    return !!v && typeof v === 'object'
+        && v._error === undefined
+        && v._symlink === undefined;
 }

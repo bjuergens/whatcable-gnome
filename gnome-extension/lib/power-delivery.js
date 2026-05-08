@@ -1,20 +1,9 @@
 // Enumerate /sys/class/usb_power_delivery/.
 
-import {sysfsToJson, asString, asInt, symlinkTarget} from './sysfsToJson.js';
+import {sysfsToJson, asString, asInt, symlinkTarget, isDirObject} from './sysfsToJson.js';
+import {PD_FILES} from './sysfs-allowlist.js';
 
 const PD_PATH = '/sys/class/usb_power_delivery';
-
-// Files we read out of a PD port directory (the port itself + every PDO
-// subdir, both source and sink shapes). Exported so typec-port.js can include
-// them when scanning partners that expose PDOs inline (UCSI).
-export const PD_FILES = new Set([
-    'revision', 'version',
-    'voltage', 'maximum_current', 'operational_current', 'peak_current',
-    'maximum_voltage', 'minimum_voltage',
-    'maximum_power', 'operational_power',
-    'pps_power_limited',
-    'maximum_current_15V_to_20V', 'maximum_current_9V_to_15V',
-]);
 
 // Where a PD port's data came from. The kernel exposes "what *this* port can
 // source/sink" and "what the *partner* advertised" through the same sysfs
@@ -27,10 +16,6 @@ export const PdProvenance = Object.freeze({
     PortSelf: 'port-self',
     Unknown: 'unknown',
 });
-
-export function isPartnerProvenance(p) {
-    return p === PdProvenance.Partner || p === PdProvenance.PartnerClass;
-}
 
 export const PdoType = Object.freeze({
     FixedSupply: 'fixed',
@@ -167,11 +152,10 @@ function parsePdo(pdo, entryName, role) {
 }
 
 function parseCapabilities(capsObj, role) {
-    if (!capsObj || typeof capsObj !== 'object' || capsObj._error) return [];
+    if (!isDirObject(capsObj)) return [];
     const pdos = [];
     for (const [name, val] of Object.entries(capsObj)) {
-        if (!val || typeof val !== 'object' || val._error || val._symlink !== undefined)
-            continue;
+        if (!isDirObject(val)) continue;
         pdos.push(parsePdo(val, name, role));
     }
     return pdos.sort((a, b) => a.index - b.index);
