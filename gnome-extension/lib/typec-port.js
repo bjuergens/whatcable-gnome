@@ -3,15 +3,21 @@
 import {sysfsToJson, asString, asHex, symlinkTarget} from './sysfsToJson.js';
 import {readPort as readPdPort, PdProvenance, PD_FILES} from './power-delivery.js';
 
+// Identity VDO files exposed by the kernel under partner/cable identity/.
+// Used both as an allowlist for sysfsToJson and as a filter inside readIdentity
+// (any unrecognised file in identity/ is ignored).
+const VDO_FILES = new Set([
+    'id_header', 'cert_stat', 'product',
+    'product_type_vdo1', 'product_type_vdo2', 'product_type_vdo3',
+]);
+
 const TYPEC_PORT_FILES = new Set([
     // port attrs
     'data_role', 'power_role', 'port_type', 'power_operation_mode',
     'orientation', 'usb_power_delivery_revision', 'usb_typec_revision',
     // partner / cable attrs
     'type', 'plug_type', 'supports_usb_power_delivery',
-    // identity (named VDO files; vdo* pattern handled in the predicate)
-    'id_header', 'cert_stat', 'product',
-    'product_type_vdo1', 'product_type_vdo2', 'product_type_vdo3',
+    ...VDO_FILES,
 ]);
 
 function typecAllow(name) {
@@ -21,15 +27,6 @@ function typecAllow(name) {
 const TYPEC_PATH = '/sys/class/typec';
 const PARTNER_PD_RE = /^pd\d+$/;
 const PORT_NUM_RE = /^port(\d+)$/;
-
-const VDO_FILES = new Set([
-    'id_header',
-    'cert_stat',
-    'product',
-    'product_type_vdo1',
-    'product_type_vdo2',
-    'product_type_vdo3',
-]);
 
 function readIdentity(entry) {
     const id = entry?.identity;

@@ -196,11 +196,6 @@ class WhatCableIndicator extends PanelMenu.Button {
             item.connect('activate', () => this._dumpSysfs(path));
             this._debugMenu.menu.addMenuItem(item);
         }
-        const hint = new PopupMenu.PopupMenuItem(
-            'View log: journalctl --user -f /usr/bin/gnome-shell',
-            {reactive: false});
-        hint.label.style_class = 'whatcable-detail';
-        this._debugMenu.menu.addMenuItem(hint);
 
         this.menu.addMenuItem(this._debugMenu);
         this._updateDebugItems();

@@ -28,10 +28,6 @@ export const PdProvenance = Object.freeze({
     Unknown: 'unknown',
 });
 
-export function isPartnerProvenance(p) {
-    return p === PdProvenance.Partner || p === PdProvenance.PartnerClass;
-}
-
 export const PdoType = Object.freeze({
     FixedSupply: 'fixed',
     Battery: 'battery',
