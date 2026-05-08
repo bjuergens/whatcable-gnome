@@ -24,9 +24,9 @@ function currentRole(value) {
     return BRACKET_RE.exec(value)?.[1] ?? value;
 }
 
-function pdoMaxWatts(capsObj) {
+function pdoMaxPowerMW(capsObj) {
     if (!capsObj || typeof capsObj !== 'object' || capsObj._error) return 0;
-    let maxW = 0;
+    let maxMW = 0;
     for (const [name, pdo] of Object.entries(capsObj)) {
         if (!pdo || typeof pdo !== 'object' || pdo._error || pdo._symlink !== undefined)
             continue;
@@ -42,9 +42,9 @@ function pdoMaxWatts(capsObj) {
             mA = asInt(pdo.maximum_current) ?? 0;
         }
         if (mW === 0 && mV > 0 && mA > 0) mW = Math.floor((mV * mA) / 1000);
-        if (mW > maxW) maxW = mW;
+        if (mW > maxMW) maxMW = mW;
     }
-    return maxW;
+    return maxMW;
 }
 
 async function readTypecPorts() {
@@ -56,16 +56,16 @@ async function readTypecPorts() {
         const role = currentRole(asString(entry.power_role) ?? '');
         // Find max wattage from any pdN/source-capabilities that hangs off the
         // partner (UCSI inline) or the linked PD class entry.
-        let maxW = 0;
+        let maxMW = 0;
         const partner = tree.find(e => e._name === `${entry._name}-partner`);
         if (partner) {
             for (const [k, v] of Object.entries(partner)) {
                 if (!/^pd\d+$/.test(k) || !v || typeof v !== 'object') continue;
-                const w = pdoMaxWatts(v['source-capabilities']);
-                if (w > maxW) maxW = w;
+                const mW = pdoMaxPowerMW(v['source-capabilities']);
+                if (mW > maxMW) maxMW = mW;
             }
         }
-        ports.push({role, maxPowerMW: maxW * 1000, partnerName: `${entry._name}-partner`});
+        ports.push({role, maxPowerMW: maxMW, partnerName: `${entry._name}-partner`});
     }
     return ports;
 }
@@ -79,8 +79,8 @@ async function readPdMaxByOwner() {
     for (const entry of tree) {
         const owner = entry.device?._symlink;
         if (!owner || !owner.includes('-partner')) continue;
-        const w = pdoMaxWatts(entry['source-capabilities']);
-        if (w > (byOwner.get(owner) ?? 0)) byOwner.set(owner, w);
+        const mW = pdoMaxPowerMW(entry['source-capabilities']);
+        if (mW > (byOwner.get(owner) ?? 0)) byOwner.set(owner, mW);
     }
     return byOwner;
 }
@@ -109,7 +109,7 @@ export async function collectIconStats() {
     let chargeW = 0, dischargeW = 0;
     for (const p of typecPorts) {
         let mW = p.maxPowerMW;
-        if (mW === 0) mW = (pdByOwner.get(p.partnerName) ?? 0) * 1000;
+        if (mW === 0) mW = pdByOwner.get(p.partnerName) ?? 0;
         const w = Math.floor(mW / 1000);
         if (p.role === 'sink') chargeW += w;
         else if (p.role === 'source') dischargeW += w;
